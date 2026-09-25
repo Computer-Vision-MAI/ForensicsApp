@@ -23,9 +23,10 @@ class ChannelSplitTool(ForensicsTool):
     def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult | None:
         assert document.current is not None
 
-        if document.current.mode in ("L", "1"):
-            raise ValueError("The image is already grayscale. "
-            "Use Undo or Reset to go back to the color image."
+        if Image.getmodebase(document.current.mode) == "L":
+            raise ValueError(
+                f"The image is grayscale ({document.current.mode}). "
+                "Use Undo or Reset to go back to the color image."
             )
 
         channel_index = simpledialog.askinteger(
@@ -51,11 +52,18 @@ class ChannelSplitTool(ForensicsTool):
             details={
                 "Operation": "Channel split",
                 "Channel": name,
-                "Min": int(channel.min()),
-                "Max": int(channel.max()),
-                "Mean": round(float(channel.mean()), 1)
+                **channel_statistics(channel),
             },
         )
+
+
+def channel_statistics(channel: np.ndarray) -> dict[str, int | float]:
+    """Return the minimum, maximum and mean (rounded to 1 decimal) of a channel."""
+    return {
+        "Min": int(channel.min()),
+        "Max": int(channel.max()),
+        "Mean": round(float(channel.mean()), 1),
+    }
 
 
 def extract_channel(array: np.ndarray, index: int) -> np.ndarray:

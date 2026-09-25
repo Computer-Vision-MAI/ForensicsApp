@@ -5,7 +5,11 @@ import numpy as np
 from PIL import Image
 
 from forensics_app.core import ImageDocument
-from forensics_app.tools.channel_split import ChannelSplitTool, extract_channel
+from forensics_app.tools.channel_split import (
+    ChannelSplitTool,
+    channel_statistics,
+    extract_channel,
+)
 
 ASK_CHANNEL = "forensics_app.tools.channel_split.simpledialog.askinteger"
 
@@ -33,6 +37,12 @@ class ChannelSplitTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 extract_channel(array, bad_index)
 
+    def test_channel_statistics(self) -> None:
+        channel = np.array([[0, 10], [20, 255]], dtype=np.uint8)
+        self.assertEqual(
+            channel_statistics(channel), {"Min": 0, "Max": 255, "Mean": 71.2}
+        )
+
 
 class ChannelSplitToolTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -53,10 +63,20 @@ class ChannelSplitToolTests(unittest.TestCase):
         with patch(ASK_CHANNEL, return_value=None):
             self.assertIsNone(ChannelSplitTool().run(None, self.document))
 
-    def test_rejects_grayscale_image(self) -> None:
-        self.document.current = Image.new("L", (4, 3))
-        with self.assertRaises(ValueError):
-            ChannelSplitTool().run(None, self.document)
+    def test_accepts_color_modes(self) -> None:
+        palette_image = Image.new("P", (4, 3), 0)
+        palette_image.putpalette([10, 20, 30])
+        for image in (Image.new("RGB", (4, 3), (10, 20, 30)), palette_image):
+            self.document.current = image
+            with self.subTest(mode=image.mode), patch(ASK_CHANNEL, return_value=2):
+                result = ChannelSplitTool().run(None, self.document)
+                self.assertTrue(np.all(np.asarray(result.image) == 30))
+
+    def test_rejects_grayscale_modes(self) -> None:
+        for mode in ("1", "L", "LA", "I", "F"):
+            self.document.current = Image.new(mode, (4, 3))
+            with self.subTest(mode=mode), self.assertRaises(ValueError):
+                ChannelSplitTool().run(None, self.document)
 
 
 if __name__ == "__main__":
