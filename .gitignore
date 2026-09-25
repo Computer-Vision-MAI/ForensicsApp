@@ -11,3 +11,5 @@ dist/
 outputs/
 models/
 datasets/
+.coverage
+coverage.xml

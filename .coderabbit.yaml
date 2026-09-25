@@ -1,0 +1,17 @@
+language: "en-US"
+reviews:
+  profile: "assertive"
+  request_changes_workflow: false
+  high_level_summary: true
+  auto_review:
+    enabled: true
+    base_branches: ["main"]
+  path_instructions:
+    - path: "forensics_app/core/**"
+      instructions: "Must not import tkinter. Pure logic only."
+    - path: "forensics_app/tools/**"
+      instructions: "Tools must not call document.apply() or mutate document.current, return a ToolResult. Numerical logic belongs in plain, tested functions."
+    - path: "tests/**"
+      instructions: "Plain unittest, no displayed required. Check edges cases (images modes RGB, RGBA, L, P, etc.)."
+      
+
