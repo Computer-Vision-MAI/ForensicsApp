@@ -73,10 +73,11 @@ class ChannelSplitToolTests(unittest.TestCase):
                 self.assertTrue(np.all(np.asarray(result.image) == 30))
 
     def test_rejects_grayscale_modes(self) -> None:
+        tool = ChannelSplitTool()
         for mode in ("1", "L", "LA", "I", "F"):
             self.document.current = Image.new(mode, (4, 3))
             with self.subTest(mode=mode), self.assertRaises(ValueError):
-                ChannelSplitTool().run(None, self.document)
+                tool.run(None, self.document)
 
 
 if __name__ == "__main__":
