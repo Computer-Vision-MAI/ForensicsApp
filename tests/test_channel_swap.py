@@ -61,6 +61,16 @@ class ChannelSwapToolTests(unittest.TestCase):
             result = ChannelSwapTool().run(None, self.document)
         self.assertIsNone(result)
 
+    def test_accepts_color_modes(self) -> None:
+        palette_image = Image.new("P", (4, 3), 0)
+        palette_image.putpalette([10, 20, 30])
+        for image in (Image.new("RGB", (4, 3), (10, 20, 30)), palette_image):
+            self.document.current = image
+            with self.subTest(mode=image.mode), patch(ASK_ORDER, return_value="BGR"):
+                result = ChannelSwapTool().run(None, self.document)
+                self.assertEqual(result.image.mode, "RGB")
+                self.assertEqual(result.image.getpixel((0, 0)), (30, 20, 10))
+
     def test_rejects_grayscale_modes(self) -> None:
         tool = ChannelSwapTool()
         for mode in ("1", "L", "LA", "I", "F"):
