@@ -27,8 +27,8 @@ class MaskTool(ForensicsTool):
     def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult | None:
         assert document.current is not None
 
-        # 1. Load the mask in the same mode as the current image
-        mask_data = self.load_image(parent, title="Open mask image", mode=document.current.mode)
+        # 1. Load the mask without forcing conversion yet so it retains its source-channel semantics
+        mask_data = self.load_image(parent, title="Open mask image", base_image=None)
         if not mask_data:
             return None  # The user canceled the selection
         mask_path, mask_img = mask_data
@@ -42,8 +42,8 @@ class MaskTool(ForensicsTool):
         
         texture_img = None
         if with_texture:
-            # Load the texture image in the same mode as the current image
-            texture_data = self.load_image(parent, title="Open texture image", mode=document.current.mode)
+            # Load the texture image in the same mode/palette as the current image
+            texture_data = self.load_image(parent, title="Open texture image", base_image=document.current)
             if not texture_data:
                 return None  # The user canceled when asked for the texture
             texture_path, texture_img = texture_data
@@ -63,7 +63,7 @@ class MaskTool(ForensicsTool):
             },
         )
 
-    def load_image(self, parent: tk.Misc, title: str, mode: str) -> tuple[Path, Image.Image] | None:
+    def load_image(self, parent: tk.Misc, title: str, base_image: Image.Image | None = None) -> tuple[Path, Image.Image] | None:
         """Open a dialog to load a generic image and return it."""
         filename = filedialog.askopenfilename(title=title, filetypes=OPEN_TYPES, parent=parent)
         if not filename:
@@ -72,8 +72,13 @@ class MaskTool(ForensicsTool):
         try:
             source = Path(filename)
             with Image.open(source) as image:
-                # Convert to the desired mode (e.g., RGB, L, etc.) without modifying the original image in memory
-                loaded = image.copy().convert(mode)
+                loaded = image.copy()
+                if base_image is not None:
+                    # Convert mapping to the base image's palette if P mode is used
+                    if base_image.mode == "P":
+                        loaded = loaded.convert("RGB").quantize(palette=base_image)
+                    else:
+                        loaded = loaded.convert(base_image.mode)
             return source, loaded
     
         except (OSError, UnidentifiedImageError) as error:
@@ -83,22 +88,25 @@ class MaskTool(ForensicsTool):
     def apply_mask(self, base_image: Image.Image, mask_img: Image.Image, texture_img: Image.Image | None) -> Image.Image:
         """Apply the mask (and optional texture) using a boolean array."""
         
-        # Resize the mask if necessary
+        # Resize the mask if necessary using NEAREST to prevent selecting originally black pixels
         if mask_img.size != base_image.size:
-            mask_img = mask_img.resize(base_image.size, Image.Resampling.LANCZOS)
+            mask_img = mask_img.resize(base_image.size, Image.Resampling.NEAREST)
 
         # Convert to numpy arrays
         base_arr = np.array(base_image)
         mask_arr = np.array(mask_img)
 
-        # Create a boolean mask: True where any channel (RGB) is > 0
-        bool_mask = mask_arr > 0
+        # Create a boolean mask: True where any channel is > 0 (reduce to one bool per pixel)
+        if mask_arr.ndim > 2:
+            bool_mask = np.any(mask_arr > 0, axis=-1)
+        else:
+            bool_mask = mask_arr > 0
 
         # Copy the original image to avoid modifying it directly in memory
         output_arr = base_arr.copy()
 
         if texture_img is not None:
-            # Texture exists: resize it, convert to array, and apply it
+            # Texture exists: resize it (keeping filter unchanged), convert to array, and apply it
             if texture_img.size != base_image.size:
                 texture_img = texture_img.resize(base_image.size, Image.Resampling.LANCZOS)
             
@@ -108,6 +116,19 @@ class MaskTool(ForensicsTool):
             output_arr[bool_mask] = texture_arr[bool_mask]
         else:
             # No texture: apply the colors from the original mask directly
-            output_arr[bool_mask] = mask_arr[bool_mask]
+            # Ensure mask colors match base mode before replacement
+            if mask_img.mode != base_image.mode:
+                if base_image.mode == "P":
+                    mask_img = mask_img.convert("RGB").quantize(palette=base_image)
+                else:
+                    mask_img = mask_img.convert(base_image.mode)
+                    
+            mask_paint_arr = np.array(mask_img)
+            output_arr[bool_mask] = mask_paint_arr[bool_mask]
 
-        return Image.fromarray(output_arr)
+        # Reconstruct result preserving base image's mode and palette
+        out_image = Image.fromarray(output_arr, mode=base_image.mode)
+        if base_image.mode == "P" and base_image.getpalette() is not None:
+            out_image.putpalette(base_image.getpalette())
+            
+        return out_image
