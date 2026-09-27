@@ -39,7 +39,15 @@ def apply_mask(base_image: Image.Image, mask_img: Image.Image, texture_img: Imag
     # Copy the original image to avoid modifying it directly in memory
     output_arr = base_arr.copy()
 
+
     if texture_img is not None:
+        # Ensure texture colors match base mode before replacement (needed as we might have loaded it not using the load_image method)
+        if texture_img.mode != base_image.mode:
+            if base_image.mode == "P":
+                texture_img = texture_img.convert("RGB").quantize(palette=base_image)
+            else:
+                texture_img = texture_img.convert(base_image.mode)
+
         # Texture exists: resize it (keeping filter unchanged), convert to array, and apply it
         if texture_img.size != base_image.size:
             texture_img = texture_img.resize(base_image.size, Image.Resampling.LANCZOS)
@@ -48,6 +56,7 @@ def apply_mask(base_image: Image.Image, mask_img: Image.Image, texture_img: Imag
 
         # Replace pixels in the original image using the boolean mask
         output_arr[bool_mask] = texture_arr[bool_mask]
+
     else:
         # No texture: apply the colors from the original mask directly
         # Ensure mask colors match base mode before replacement

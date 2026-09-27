@@ -71,6 +71,18 @@ class ApplyMaskTests(unittest.TestCase):
         # Unselected pixel must retain the exact base RGBA color without degradation
         self.assertTrue(np.all(result_array[1, 1] == [10, 20, 30, 255]))
 
+    def test_apply_mask_converts_mixed_mode_texture(self) -> None:
+            #Test that a texture in a different mode than the base image is converted correctly.
+            base = Image.new("RGBA", (2, 2), (10, 20, 30, 255))
+            mask = Image.new("L", (2, 2), 0)
+            mask.putpixel((0, 0), 255)
+            texture = Image.new("RGB", (2, 2), (200, 100, 50))
+    
+            result = apply_mask(base, mask, texture)
+     
+            self.assertEqual(result.mode, "RGBA")
+            self.assertEqual(result.getpixel((0, 0)), (200, 100, 50, 255))
+
     def test_apply_mask_grayscale_base(self) -> None:
         # Base with 1 channel (L)
         base_l = Image.new("L", (2, 2), color=50)
