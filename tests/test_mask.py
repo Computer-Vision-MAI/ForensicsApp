@@ -6,7 +6,7 @@ import numpy as np
 from PIL import Image, UnidentifiedImageError
 
 from forensics_app.core import ImageDocument
-from forensics_app.tools.mask import MaskTool
+from forensics_app.tools.mask import MaskTool, apply_mask
 
 # Constants for patching dependencies
 ASK_OPEN_FILENAME = "forensics_app.tools.mask.filedialog.askopenfilename"
@@ -16,9 +16,8 @@ IMAGE_OPEN = "forensics_app.tools.mask.Image.open"
 
 
 class ApplyMaskTests(unittest.TestCase):
-    """Unit tests for the apply_mask method of MaskTool."""
+    """Unit tests for the apply_mask function."""
     def setUp(self) -> None:
-        self.tool = MaskTool()
         # Create a 2x2 black base image
         self.base_image = Image.new("RGB", (2, 2), color=(0, 0, 0))
         
@@ -28,7 +27,7 @@ class ApplyMaskTests(unittest.TestCase):
 
     def test_apply_mask_without_texture(self) -> None:
         # Should replace the masked pixel with the mask's own color
-        result = self.tool.apply_mask(self.base_image, self.mask_img, None)
+        result = apply_mask(self.base_image, self.mask_img, None)
         result_array = np.array(result)
 
         # Assert complete output pixel explicitly to ensure channel-wise consistency
@@ -39,7 +38,7 @@ class ApplyMaskTests(unittest.TestCase):
         # Should replace the masked pixel with the texture's color
         texture_img = Image.new("RGB", (2, 2), color=(10, 200, 50))
         
-        result = self.tool.apply_mask(self.base_image, self.mask_img, texture_img)
+        result = apply_mask(self.base_image, self.mask_img, texture_img)
         result_array = np.array(result)
 
         self.assertTrue(np.all(result_array[0, 0] == [10, 200, 50]))  # From texture
@@ -50,7 +49,7 @@ class ApplyMaskTests(unittest.TestCase):
         large_mask = Image.new("RGB", (10, 10), color=(255, 0, 0))
         large_texture = Image.new("RGB", (5, 5), color=(100, 100, 100))
 
-        result = self.tool.apply_mask(self.base_image, large_mask, large_texture)
+        result = apply_mask(self.base_image, large_mask, large_texture)
         
         # Output must be the size of the base image
         self.assertEqual(result.size, (2, 2))
@@ -62,7 +61,7 @@ class ApplyMaskTests(unittest.TestCase):
         mask_rgb = Image.new("RGB", (2, 2), color=(0, 0, 0))
         mask_rgb.putpixel((0, 0), (0, 255, 0))
         
-        result = self.tool.apply_mask(base_rgba, mask_rgb, None)
+        result = apply_mask(base_rgba, mask_rgb, None)
         result_array = np.array(result)
         
         # Output must maintain the RGBA mode
@@ -78,7 +77,7 @@ class ApplyMaskTests(unittest.TestCase):
         mask_rgb = Image.new("RGB", (2, 2), color=(0, 0, 0))
         mask_rgb.putpixel((0, 0), (200, 200, 200))
         
-        result = self.tool.apply_mask(base_l, mask_rgb, None)
+        result = apply_mask(base_l, mask_rgb, None)
         
         # Output must maintain the L mode
         self.assertEqual(result.mode, "L")
@@ -99,7 +98,7 @@ class ApplyMaskTests(unittest.TestCase):
         mask_rgb = Image.new("RGB", (2, 2), color=(0, 0, 0))
         mask_rgb.putpixel((0, 0), (255, 0, 0))
         
-        result = self.tool.apply_mask(base_p, mask_rgb, None)
+        result = apply_mask(base_p, mask_rgb, None)
         
         # Output must maintain P mode and preserve the exact original palette
         self.assertEqual(result.mode, "P")
@@ -150,6 +149,7 @@ class MaskToolLogicTests(unittest.TestCase):
 
         result = self.tool.run(None, self.document)
         self.assertIsNotNone(result)
+        self.assertEqual(result.image.getpixel((0, 0)), (255, 255, 255))
         self.assertEqual(result.details["Mask used"], "fake_mask.png")
         self.assertEqual(result.details["Texture applied"], "No Texture")
 
@@ -172,6 +172,7 @@ class MaskToolLogicTests(unittest.TestCase):
 
         result = self.tool.run(None, self.document)
         self.assertIsNotNone(result)
+        self.assertEqual(result.image.getpixel((0, 0)), (255, 0, 0))
         self.assertEqual(result.details["Mask used"], "fake_mask.png")
         self.assertEqual(result.details["Texture applied"], "fake_texture.png")
 

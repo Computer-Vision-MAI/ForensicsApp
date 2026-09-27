@@ -18,6 +18,55 @@ OPEN_TYPES = [
     ("All files", "*.*"),
 ]
 
+def apply_mask(base_image: Image.Image, mask_img: Image.Image, texture_img: Image.Image | None) -> Image.Image:
+    """Apply the mask (and optional texture) using a boolean array."""
+
+    # Resize the mask if necessary using NEAREST to prevent selecting originally black pixels
+    if mask_img.size != base_image.size:
+        mask_img = mask_img.resize(base_image.size, Image.Resampling.NEAREST)
+
+    # Convert to numpy arrays
+    base_arr = np.array(base_image)
+    mask_arr = np.array(mask_img)
+
+    # Create a boolean mask: True where any channel is > 0 (reduce to one bool per pixel)
+    if mask_arr.ndim > 2:
+        bool_mask = np.any(mask_arr > 0, axis=-1)
+    else:
+        bool_mask = mask_arr > 0
+
+    # Copy the original image to avoid modifying it directly in memory
+    output_arr = base_arr.copy()
+
+    if texture_img is not None:
+        # Texture exists: resize it (keeping filter unchanged), convert to array, and apply it
+        if texture_img.size != base_image.size:
+            texture_img = texture_img.resize(base_image.size, Image.Resampling.LANCZOS)
+
+        texture_arr = np.array(texture_img)
+
+        # Replace pixels in the original image using the boolean mask
+        output_arr[bool_mask] = texture_arr[bool_mask]
+    else:
+        # No texture: apply the colors from the original mask directly
+        # Ensure mask colors match base mode before replacement
+        if mask_img.mode != base_image.mode:
+            if base_image.mode == "P":
+                mask_img = mask_img.convert("RGB").quantize(palette=base_image)
+            else:
+                mask_img = mask_img.convert(base_image.mode)
+
+        mask_paint_arr = np.array(mask_img)
+        output_arr[bool_mask] = mask_paint_arr[bool_mask]
+
+    # Reconstruct result preserving base image's mode and palette
+    out_image = Image.fromarray(output_arr, mode=base_image.mode)
+    if base_image.mode == "P" and base_image.getpalette() is not None:
+        out_image.putpalette(base_image.getpalette())
+
+    return out_image
+
+
 class MaskTool(ForensicsTool):
     tool_id = "mask"
     title = "Apply mask"
@@ -49,7 +98,7 @@ class MaskTool(ForensicsTool):
             texture_path, texture_img = texture_data
 
         # 3. Apply the boolean logic
-        output = self.apply_mask(document.current, mask_img, texture_img)
+        output = apply_mask(document.current, mask_img, texture_img)
   
         # 4. Return the result
         return ToolResult(
@@ -84,51 +133,3 @@ class MaskTool(ForensicsTool):
         except (OSError, UnidentifiedImageError) as error:
             messagebox.showerror("Could not open image", str(error), parent=parent)
             return None
-
-    def apply_mask(self, base_image: Image.Image, mask_img: Image.Image, texture_img: Image.Image | None) -> Image.Image:
-        """Apply the mask (and optional texture) using a boolean array."""
-        
-        # Resize the mask if necessary using NEAREST to prevent selecting originally black pixels
-        if mask_img.size != base_image.size:
-            mask_img = mask_img.resize(base_image.size, Image.Resampling.NEAREST)
-
-        # Convert to numpy arrays
-        base_arr = np.array(base_image)
-        mask_arr = np.array(mask_img)
-
-        # Create a boolean mask: True where any channel is > 0 (reduce to one bool per pixel)
-        if mask_arr.ndim > 2:
-            bool_mask = np.any(mask_arr > 0, axis=-1)
-        else:
-            bool_mask = mask_arr > 0
-
-        # Copy the original image to avoid modifying it directly in memory
-        output_arr = base_arr.copy()
-
-        if texture_img is not None:
-            # Texture exists: resize it (keeping filter unchanged), convert to array, and apply it
-            if texture_img.size != base_image.size:
-                texture_img = texture_img.resize(base_image.size, Image.Resampling.LANCZOS)
-            
-            texture_arr = np.array(texture_img)
-            
-            # Replace pixels in the original image using the boolean mask
-            output_arr[bool_mask] = texture_arr[bool_mask]
-        else:
-            # No texture: apply the colors from the original mask directly
-            # Ensure mask colors match base mode before replacement
-            if mask_img.mode != base_image.mode:
-                if base_image.mode == "P":
-                    mask_img = mask_img.convert("RGB").quantize(palette=base_image)
-                else:
-                    mask_img = mask_img.convert(base_image.mode)
-                    
-            mask_paint_arr = np.array(mask_img)
-            output_arr[bool_mask] = mask_paint_arr[bool_mask]
-
-        # Reconstruct result preserving base image's mode and palette
-        out_image = Image.fromarray(output_arr, mode=base_image.mode)
-        if base_image.mode == "P" and base_image.getpalette() is not None:
-            out_image.putpalette(base_image.getpalette())
-            
-        return out_image
