@@ -1,0 +1,9 @@
+- core: has image_document.py, which has the undo, current and redo images and applies changes to those (load, reset, undo, apply...)
+
+- tools: in the __init__.py, it creates a ToolsRegistry object with every specific tool object. The tool objects are specifications of the abstract ForensicsTool
+from base.py and override the run function. The ToolsRegistry is defined in registry.py, which creates a sorted dict with the specific tools' ids as keys and the
+tools as values.
+
+- ui: main_window.py creates a ImageDocument (core) and creates all the ui. It gets the ToolsRegistry and thus, creates a button for each one, binding their
+respective run function to the click and then applies the changes to the document and shows the destails from the ToolResult. It also creates the ImageView object
+defined at image_view.py.
