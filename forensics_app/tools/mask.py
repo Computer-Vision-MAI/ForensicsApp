@@ -27,7 +27,8 @@ def apply_mask(base_image: Image.Image, mask_img: Image.Image, texture_img: Imag
 
     # Convert to numpy arrays
     base_arr = np.array(base_image)
-    mask_arr = np.array(mask_img)
+    select_img = mask_img.convert("RGB") if mask_img.mode in ("P", "PA") else mask_img
+    mask_arr = np.array(select_img)
 
     # Create a boolean mask: True where any channel is > 0 (reduce to one bool per pixel)
     if mask_arr.ndim > 2:
@@ -63,6 +64,7 @@ def apply_mask(base_image: Image.Image, mask_img: Image.Image, texture_img: Imag
     out_image = Image.fromarray(output_arr, mode=base_image.mode)
     if base_image.mode == "P" and base_image.getpalette() is not None:
         out_image.putpalette(base_image.getpalette())
+        out_image.info["transparency"] = base_image.info.get("transparency")
 
     return out_image
 
