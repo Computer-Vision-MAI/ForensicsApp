@@ -105,6 +105,8 @@ class HistogramToolTests(unittest.TestCase):
         self.document.current = Image.new("L", (2, 2), color=0)
         source = self.document.current
         result = self.tool.run(None, self.document)
+        # Check that the output image has the expected size and mode 
+        # fig is created with figsize=(8, 6) and dpi=100 by default, so the output image size is (800, 600)
         self.assertEqual(result.image.size, (800, 600))
         self.assertEqual(result.image.mode, "RGBA")
         self.assertIs(self.document.current, source)
