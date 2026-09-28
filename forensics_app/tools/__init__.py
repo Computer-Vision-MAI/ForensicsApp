@@ -7,6 +7,7 @@ from .image_info import ImageInfoTool
 from .registry import ToolRegistry
 from .mask import MaskTool
 from .histogram import HistogramTool
+from .contrast_stretch import ContrastStretchTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -17,7 +18,8 @@ def build_tool_registry() -> ToolRegistry:
             ChannelSplitTool(),
             ChannelSwapTool(),
             MaskTool(),
-            HistogramTool()
+            HistogramTool(),
+            ContrastStretchTool()
         ]
     )
 
