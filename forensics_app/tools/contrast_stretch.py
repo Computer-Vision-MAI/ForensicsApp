@@ -19,10 +19,10 @@ def apply_contrast_stretch(img: Image.Image) -> Image.Image:
     """Normalizes the image to span the full 0-255 intensity range independently per channel."""
     mode = img.mode
     
-    # Convert palette images to RGB first to process actual colors
+    # Expand palette colors while retaining any transparency.
     if mode in ("P", "PA"):
-        img = img.convert("RGB")
-        mode = "RGB"
+        mode = "RGBA" if mode == "PA" or "transparency" in img.info else "RGB"
+        img = img.convert(mode)
         
     # Convert to float32 to prevent integer overflow during math operations
     img_array = np.array(img).astype(np.float32)
@@ -53,7 +53,8 @@ def apply_contrast_stretch(img: Image.Image) -> Image.Image:
     else:
         final_array = stretched
         
-    return Image.fromarray(final_array.astype(np.uint8), mode=mode)
+    output_mode = "L" if mode in ("I", "F") else mode
+    return Image.fromarray(final_array.astype(np.uint8), mode=output_mode)
 
 
 class ContrastStretchTool(ForensicsTool):
