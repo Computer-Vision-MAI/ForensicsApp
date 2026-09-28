@@ -10,6 +10,34 @@ from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
 
 
+def calculate_histograms(image: Image.Image) -> dict[str, np.ndarray]:
+    """Return 256-bin counts per channel for supported 8-bit image modes.
+
+    Binary images use intensities 0 and 255; palette images use RGBA colors.
+    Other modes are rejected rather than flattened or silently clipped.
+    """
+    if image.mode == "1":
+        image = image.convert("L")
+    elif image.mode in ("P", "PA"):
+        image = image.convert("RGBA")
+
+    channels = {
+        "L": ("Intensity",),
+        "LA": ("Intensity", "Alpha"),
+        "RGB": ("Red", "Green", "Blue"),
+        "RGBA": ("Red", "Green", "Blue", "Alpha"),
+        "CMYK": ("Cyan", "Magenta", "Yellow", "Black"),
+    }
+    if image.mode not in channels:
+        raise ValueError(f"Histogram does not support image mode {image.mode!r}.")
+
+    img_array = np.array(image).reshape(-1, len(channels[image.mode]))
+    return {
+        name: np.bincount(img_array[:, index], minlength=256)
+        for index, name in enumerate(channels[image.mode])
+    }
+
+
 class HistogramTool(ForensicsTool):
     tool_id = "histogram"
     title = "Generate Histogram"
@@ -18,53 +46,21 @@ class HistogramTool(ForensicsTool):
 
     def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult | None:
         assert document.current is not None
-        
-        current_image = document.current
-        mode = current_image.mode
 
-        # Convert palette images to RGBA to get accurate color channels
-        if mode in ("P", "PA"):
-            current_image = current_image.convert("RGBA")
-            mode = current_image.mode
-            
-        img_array = np.array(current_image)
+        histograms = calculate_histograms(document.current)
 
         # Create an isolated Matplotlib figure
         fig = Figure(figsize=(8, 6), tight_layout=True)
         canvas = FigureCanvasAgg(fig)
         ax = fig.add_subplot(111)
-        
-        # Plot logic based on image mode
-        if mode in ("RGB", "RGBA"):
-            channel_names = ("Red", "Green", "Blue", "Alpha")
-            colors = ("red", "green", "blue", "gray")
-            
-            # Iterate through available channels (3 for RGB, 4 for RGBA)
-            for i in range(img_array.shape[-1]):
-                channel_data = img_array[..., i].flatten()
-                ax.plot(
-                    np.arange(256),
-                    np.histogram(channel_data, bins=256, range=(0, 256))[0],
-                    color=colors[i],
-                    alpha=0.7,
-                    label=channel_names[i]
-                )
-        
-            
-            ax.legend(loc="upper right")
-            
-        else:
-            # Handle Grayscale ("L") or Binary ("1")
-            channel_data = img_array.flatten()
-            ax.hist(
-                channel_data, 
-                bins=256, 
-                range=(0, 256), 
-                color="black", 
-                alpha=0.7, 
-                label="Intensity"
-            )
-            ax.legend(loc="upper right")
+        colors = {
+            "Intensity": "black", "Alpha": "gray",
+            "Red": "red", "Green": "green", "Blue": "blue",
+            "Cyan": "cyan", "Magenta": "magenta", "Yellow": "yellow", "Black": "black",
+        }
+        for name, counts in histograms.items():
+            ax.plot(np.arange(256), counts, color=colors[name], alpha=0.7, label=name)
+        ax.legend(loc="upper right")
 
         # Configure chart aesthetics
         ax.set_title("Image Histogram")
@@ -75,24 +71,25 @@ class HistogramTool(ForensicsTool):
         # Render the figure to a raw RGBA buffer
         canvas.draw()
         rgba_buffer = canvas.buffer_rgba()
-        
+
         # Convert the buffer directly to a PIL Image
         hist_image = Image.frombuffer(
-            "RGBA", 
-            canvas.get_width_height(), 
-            rgba_buffer, 
-            "raw", 
-            "RGBA", 
-            0, 
+            "RGBA",
+            canvas.get_width_height(),
+            rgba_buffer,
+            "raw",
+            "RGBA",
+            0,
             1
         )
 
         return ToolResult(
             image=hist_image,
+            preview_only=True,
             message="Histogram generated successfully.",
             details={
                 "Operation": "Histogram extraction",
                 "Original Mode": document.current.mode,
-                "Channels Plotted": img_array.shape[-1] if len(img_array.shape) > 2 else 1
+                "Channels Plotted": len(histograms)
             },
         )
