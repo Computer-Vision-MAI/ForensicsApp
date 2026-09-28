@@ -65,8 +65,9 @@ class HistogramCalculationTests(unittest.TestCase):
     def test_unsupported_modes_are_rejected(self):
         for mode in ("I", "F", "I;16", "HSV", "YCbCr"):
             with self.subTest(mode=mode):
+                image = Image.new(mode, (2, 2))
                 with self.assertRaisesRegex(ValueError, "does not support image mode"):
-                    calculate_histograms(Image.new(mode, (2, 2)))
+                    calculate_histograms(image)
 
 
 class HistogramToolTests(unittest.TestCase):
