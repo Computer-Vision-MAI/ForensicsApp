@@ -19,6 +19,8 @@ class ToolResult:
     message: str
     image: Image.Image | None = None
     details: dict[str, Any] = field(default_factory=dict)
+    # Display analysis images without replacing the working image or edit history.
+    preview_only: bool = False
 
 
 class ForensicsTool(ABC):

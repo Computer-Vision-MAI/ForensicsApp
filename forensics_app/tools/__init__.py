@@ -6,6 +6,7 @@ from .grayscale import GrayscaleTool
 from .image_info import ImageInfoTool
 from .registry import ToolRegistry
 from .mask import MaskTool
+from .histogram import HistogramTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -15,7 +16,8 @@ def build_tool_registry() -> ToolRegistry:
             GrayscaleTool(),
             ChannelSplitTool(),
             ChannelSwapTool(),
-            MaskTool()
+            MaskTool(),
+            HistogramTool()
         ]
     )
 

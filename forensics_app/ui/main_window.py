@@ -170,11 +170,14 @@ class MainWindow:
         if result is None:
             self.status.set(f"Cancelled {tool.title}.")
             return
-        if result.image is not None:
+        if result.image is not None and not result.preview_only:
             self.document.apply(result.image)
         self._show_details(result.details)
         self.status.set(result.message)
         self._refresh()
+        # If the result is a preview image, show it in the image view without applying it to the document
+        if result.image is not None and result.preview_only:
+            self.image_view.show(result.image)
 
     def undo(self) -> None:
         if self.document.undo():
