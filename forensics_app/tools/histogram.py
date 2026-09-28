@@ -25,6 +25,7 @@ class HistogramTool(ForensicsTool):
         # Convert palette images to RGBA to get accurate color channels
         if mode in ("P", "PA"):
             current_image = current_image.convert("RGBA")
+            mode = current_image.mode
             
         img_array = np.array(current_image)
 
@@ -32,7 +33,7 @@ class HistogramTool(ForensicsTool):
         fig = Figure(figsize=(8, 6), tight_layout=True)
         canvas = FigureCanvasAgg(fig)
         ax = fig.add_subplot(111)
-
+        
         # Plot logic based on image mode
         if mode in ("RGB", "RGBA"):
             channel_names = ("Red", "Green", "Blue", "Alpha")
@@ -55,13 +56,13 @@ class HistogramTool(ForensicsTool):
         else:
             # Handle Grayscale ("L") or Binary ("1")
             channel_data = img_array.flatten()
-            ax.plot(
-                np.arange(256),
-                np.histogram(channel_data, bins=256, range=(0, 256))[0], 
+            ax.hist(
+                channel_data, 
+                bins=256, 
+                range=(0, 256), 
                 color="black", 
                 alpha=0.7, 
-                label="Intensity",
-                
+                label="Intensity"
             )
             ax.legend(loc="upper right")
 
@@ -92,6 +93,6 @@ class HistogramTool(ForensicsTool):
             details={
                 "Operation": "Histogram extraction",
                 "Original Mode": document.current.mode,
-                "Channels Plotted": img_array.ndim if len(img_array.shape) > 2 else 1
+                "Channels Plotted": img_array.shape[-1] if len(img_array.shape) > 2 else 1
             },
         )
