@@ -12,6 +12,7 @@ from forensics_app.core import ImageDocument
 from forensics_app.tools.base import ForensicsTool
 from forensics_app.tools.registry import ToolRegistry
 from .image_view import ImageView
+from forensics_app.core.pixel_info import pixel_color, describe_pixel
 
 
 OPEN_TYPES = [
@@ -27,6 +28,7 @@ class MainWindow:
         self.registry = registry
         self.document = ImageDocument()
         self.status = tk.StringVar(value="Ready. Open an image to begin.")
+        self.pixel_info = tk.StringVar(value="Hover over the image to inspect pixels.")
 
         self._configure_window()
         self._build_menu()
@@ -103,7 +105,7 @@ class MainWindow:
                 button.bind("<Enter>", lambda _event, selected=tool: self.status.set(selected.description))
                 button.bind("<Leave>", lambda _event: self.status.set("Ready."))
 
-        self.image_view = ImageView(body)
+        self.image_view = ImageView(body, on_hover=self._on_pixel_hover)
         body.add(self.image_view, weight=1)
 
         inspector = ttk.Frame(body, padding=12, width=250)
@@ -117,7 +119,17 @@ class MainWindow:
         self.results.column("value", width=120, stretch=True)
         self.results.pack(fill="both", expand=True)
 
-        ttk.Label(container, textvariable=self.status, anchor="w", padding=(10, 6), relief="sunken").pack(fill="x")
+        status_bar = ttk.Frame(container, relief="sunken")
+        status_bar.pack(fill="x")
+
+        self.pixel_swatch = tk.Label(status_bar, width=2)
+        self.pixel_swatch.pack(side="right", padx=(0, 10), pady=4)
+        self._swatch_idle = self.pixel_swatch.cget("background")
+
+        ttk.Label(status_bar, textvariable=self.pixel_info, font="TkFixedFont").pack(side="right", padx=6)
+        ttk.Label(status_bar, textvariable=self.status, anchor="w", padding=(10,6)).pack(
+            side="left", fill="x", expand=True
+        )
 
     def _bind_shortcuts(self) -> None:
         self.root.bind_all("<Control-o>", lambda _event: self.open_image())
@@ -209,6 +221,18 @@ class MainWindow:
         self.redo_button.configure(state="normal" if self.document.can_redo else "disabled")
         title = self.document.path.name if self.document.path else "No image"
         self.root.title(f"ForensicsApp — {title}")
+
+    def _on_pixel_hover(self, coords: tuple[int, int] | None) -> None:
+        image = self.document.current
+        if coords is None or image is None:
+            self.pixel_info.set("Hover over the image to inspect pixels.")
+            self.pixel_swatch.configure(background=self._swatch_idle)
+            return
+
+        self.pixel_info.set(describe_pixel(image, *coords))
+        color = pixel_color(image, *coords)
+        swatch = "#{:02x}{:02x}{:02x}".format(*color) if color else self._swatch_idle
+        self.pixel_swatch.configure(background=swatch)    
 
     def _show_default_details(self) -> None:
         image = self.document.current
