@@ -12,6 +12,13 @@ from collections.abc import Callable
 from .image_placement import ImagePlacement
 
 
+_DISPLAY_CONVERSIONS = {"LAB": "RGB", "La": "LA"}
+
+def _displayable(image: Image.Image) -> Image.Image:
+    """Return ``image`` in a mode TK can draw, converting only when needed."""
+    target = _DISPLAY_CONVERSIONS.get(image.mode)
+    return image.convert(target) if target else image
+
 class ImageView(ttk.Frame):
     def __init__(
         self, 
@@ -69,6 +76,7 @@ class ImageView(ttk.Frame):
         available = (max(self.canvas.winfo_width() - 24, 1), max(self.canvas.winfo_height() - 24, 1))
         preview = self._source.copy()
         preview.thumbnail(available, Image.Resampling.LANCZOS)
+        preview = _displayable(preview)
         self._photo = ImageTk.PhotoImage(preview)
         left = (self.canvas.winfo_width() - preview.width) // 2
         top = (self.canvas.winfo_height() - preview.height) // 2
