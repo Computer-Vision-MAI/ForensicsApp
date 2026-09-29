@@ -5,17 +5,18 @@ from __future__ import annotations
 from PIL import Image
 
 
+_NUMERIC_MODES = frozenset({"I", "F", "I;16", "I;16L", "I;16B", "I;16N"})
+
+
 def pixel_color(image: Image.Image, column: int, row: int) -> tuple[int, int, int] | None:
-    """Return the RGB color of a pixel, or None for modes without a direct color (I, F...)."""
-    value = image.getpixel((column, row))
-    if image.mode == "P":
-        start = 3 * value
-        return tuple(image.getpalette()[start:start + 3])
-    if isinstance(value, tuple):
-        return value[:3]
-    if image.mode in ("L", "1"):
-        return (value, value, value)
-    return None
+    """Return the on-screen RGB color of a pixel, or None for numeric modes."""
+    if image.mode in _NUMERIC_MODES:
+        return None
+    pixel = image.crop((column, row, column + 1, row + 1))
+    if pixel.mode == "La":
+        pixel = pixel.convert("LA")
+    return pixel.convert("RGB").getpixel((0, 0))
+
 
 def describe_pixel(image: Image.Image, column: int, row: int) -> str:
     """Return e.g `x 120, y 45 | RGB (200, 20, 30)` for the pixel at (column, row) in the image."""

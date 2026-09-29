@@ -223,7 +223,7 @@ class MainWindow:
         self.root.title(f"ForensicsApp — {title}")
 
     def _on_pixel_hover(self, coords: tuple[int, int] | None) -> None:
-        image = self.document.current
+        image = self.image_view.image
         if coords is None or image is None:
             self.pixel_info.set("Hover over the image to inspect pixels.")
             self.pixel_swatch.configure(background=self._swatch_idle)

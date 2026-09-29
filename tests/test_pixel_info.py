@@ -23,6 +23,26 @@ class PixelInfoTests(unittest.TestCase):
         image = Image.new("F", (2, 2), 0.5)
         self.assertIsNone(pixel_color(image, 0, 0))
 
+    def test_sixteen_bit_image_has_no_color(self) -> None:
+        self.assertIsNone(pixel_color(Image.new("I;16", (2, 2)), 0, 0))
+
+    def test_luminance_alpha_uses_gray(self) -> None:
+        image = Image.new("LA", (2, 2), (77, 200))
+        self.assertEqual(pixel_color(image, 0, 0), (77, 77, 77))
+
+    def test_premultiplied_luminance_alpha_uses_gray(self) -> None:
+        image = Image.new("La", (2, 2), (77, 255))
+        self.assertEqual(pixel_color(image, 0, 0), (77, 77, 77))
+
+    def test_cmyk_is_converted_to_screen_color(self) -> None:
+        image = Image.new("CMYK", (2, 2), (255, 0, 0, 0))  # full cyan ink
+        self.assertEqual(pixel_color(image, 0, 0), (0, 255, 255))
+
+    def test_reads_the_requested_pixel(self) -> None:
+        image = Image.new("RGB", (2, 1), (0, 0, 0))
+        image.putpixel((1, 0), (200, 20, 30))
+        self.assertEqual(pixel_color(image, 1, 0), (200, 20, 30))
+
 
 class DescribePixelTests(unittest.TestCase):
     def test_describe_pixel_rgb(self) -> None:

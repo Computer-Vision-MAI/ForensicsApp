@@ -41,6 +41,11 @@ class ImageView(ttk.Frame):
         self._source = image
         self._render()
 
+    @property
+    def image(self) -> Image.Image | None:
+        """The image currently on screen: the working image or a preview-only result."""
+        return self._source
+
     def _on_resize(self, _event: tk.Event) -> None:
         if self._resize_job is not None:
             self.after_cancel(self._resize_job)
