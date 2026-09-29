@@ -36,8 +36,9 @@ class ToMultichannelTests(unittest.TestCase):
     def test_rejects_single_channel_modes(self) -> None:
         for mode, names in MODE_CHANNELS.items():
             if len(names) == 1 and mode != "P":
+                image = Image.new(mode, (2, 2))
                 with self.subTest(mode=mode), self.assertRaises(ValueError):
-                    to_multichannel(Image.new(mode, (2, 2)))
+                    to_multichannel(image)
 
 
 if __name__ == "__main__":

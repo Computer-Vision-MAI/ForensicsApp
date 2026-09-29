@@ -12,8 +12,10 @@ class DisplayableTests(unittest.TestCase):
                 self.assertEqual(_displayable(Image.new(mode, (2, 2))).mode, expected)
 
     def test_keeps_drawable_modes_untouched(self) -> None:
-        image = Image.new("CMYK", (2, 2))
-        self.assertIs(_displayable(image), image)
+        for mode in ("RGB", "RGBA", "L", "P", "CMYK"):
+            image = Image.new(mode, (2, 2))
+            with self.subTest(mode=mode):
+                self.assertIs(_displayable(image), image)
 
 
 if __name__ == "__main__":
