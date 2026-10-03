@@ -29,7 +29,7 @@ def apply_mask(base_image: Image.Image, mask_img: Image.Image, texture_img: Imag
     base_arr = np.array(base_image)
     # Select the appropriate mode for the mask to ensure we can create a boolean mask.
     # If the mask is in a mode with an alpha channel or palette, we convert it to RGB to ensure we can check for non-zero pixels.
-    select_img = mask_img.convert("RGB") if mask_img.mode in ("P", "PA", "RGBA") else mask_img
+    select_img = mask_img.convert("RGB") if mask_img.mode in ("P", "PA", "RGBA", "LA") else mask_img
     mask_arr = np.array(select_img)
 
     # Create a boolean mask: True where any channel is > 0 (reduce to one bool per pixel)
