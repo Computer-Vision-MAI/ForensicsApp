@@ -10,6 +10,7 @@ from PIL import Image
 ALPHA = "Alpha"
 PADDING = "Padding"
 FIXED_CHANNELS = frozenset([ALPHA, PADDING])
+NUMERIC_MODES = frozenset(["I", "F", "I;16", "I;16L", "I;16B", "I;16N"])
 
 _SIXTEEN_BIT = ("Intensity (16-bit)",)
 

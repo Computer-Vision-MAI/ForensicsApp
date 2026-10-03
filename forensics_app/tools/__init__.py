@@ -8,6 +8,7 @@ from .registry import ToolRegistry
 from .mask import MaskTool
 from .histogram import HistogramTool
 from .contrast_stretch import ContrastStretchTool
+from .convert_mode import ConvertModeTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -17,9 +18,10 @@ def build_tool_registry() -> ToolRegistry:
             GrayscaleTool(),
             ChannelSplitTool(),
             ChannelSwapTool(),
+            ConvertModeTool(),
             MaskTool(),
             HistogramTool(),
-            ContrastStretchTool()
+            ContrastStretchTool(),
         ]
     )
 

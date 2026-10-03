@@ -26,6 +26,12 @@ class PixelInfoTests(unittest.TestCase):
     def test_sixteen_bit_image_has_no_color(self) -> None:
         self.assertIsNone(pixel_color(Image.new("I;16", (2, 2)), 0, 0))
 
+    def test_integer_image_has_no_color(self) -> None:
+        self.assertIsNone(pixel_color(Image.new("I", (2, 2), 70000), 0, 0))
+
+    def test_binary_image_uses_black_or_white(self) -> None:
+        self.assertEqual(pixel_color(Image.new("1", (2, 2), 1), 0, 0), (255, 255, 255))
+
     def test_luminance_alpha_uses_gray(self) -> None:
         image = Image.new("LA", (2, 2), (77, 200))
         self.assertEqual(pixel_color(image, 0, 0), (77, 77, 77))
