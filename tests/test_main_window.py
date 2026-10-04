@@ -31,7 +31,8 @@ class MainWindowToolTests(unittest.TestCase):
         source = document.current
         # Run the histogram tool
         with patch.object(document, "apply", wraps=document.apply) as apply:
-            self.window.run_tool(HistogramTool())
+            with patch("forensics_app.tools.histogram.simpledialog.askinteger", return_value=256):
+                self.window.run_tool(HistogramTool())
         # Verify that the document's apply method was not called, meaning the histogram tool did not modify the document or its history
         apply.assert_not_called()
         # Verify that the document's current image is still the green image

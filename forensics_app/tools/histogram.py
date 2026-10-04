@@ -87,7 +87,7 @@ def calculate_histograms(image: Image.Image, bins: int = 256) -> dict[str, tuple
         
         # np.histogram handles floats, negatives, and large ints naturally
         if is_standard_8bit:
-            counts, edges = np.histogram(channel_data, bins=bins, range=(0, 256))
+            counts, edges = np.histogram(channel_data, bins=bins, range=(0, 256))  # Force 8-bit range for standard modes
         else:
             counts, edges = np.histogram(channel_data, bins=bins)
             
@@ -133,23 +133,48 @@ class HistogramTool(ForensicsTool):
         canvas = FigureCanvasAgg(fig)
         ax = fig.add_subplot(111)
 
-        x_min, x_max = float('inf'), float('-inf')
+        # Initialize active data limits to infinity for dynamic adjustment
+        active_min_edge = float('inf')
+        active_max_edge = float('-inf')
+        
+        # Track the total plot boundaries to maintain visual limits
+        plot_x_min = float('inf')
+        plot_x_max = float('-inf')
 
         for index, (name, (counts, edges)) in enumerate(histograms.items()):
-            # Calculate midpoints of bins to draw smooth lines
+            # Calculate midpoints of bins to plot lines at the geometric center
             bin_centers = (edges[:-1] + edges[1:]) / 2
             
             color = get_channel_color(name, index)
             ax.plot(bin_centers, counts, color=color, alpha=0.7, label=name)
             
-            # Track global min/max to properly bound the X axis
-            x_min = min(x_min, edges[0])
-            x_max = max(x_max, edges[-1])
+            # --- FIND THE ACTIVE DATA RANGE ---
+            # np.nonzero returns the indices where the bin count is greater than 0
+            non_zero_indices = np.nonzero(counts)[0]
+            
+            if len(non_zero_indices) > 0:
+                first_idx = non_zero_indices[0]
+                last_idx = non_zero_indices[-1]
+                
+                # Store the left edge of the first active bin
+                active_min_edge = min(active_min_edge, edges[first_idx])
+                # Store the right edge of the last active bin
+                active_max_edge = max(active_max_edge, edges[last_idx + 1])
+                
+            # Track the total boundaries for the plot (including empty zones)
+            plot_x_min = min(plot_x_min, edges[0])
+            plot_x_max = max(plot_x_max, edges[-1])
 
         ax.legend(loc="upper right")
         
-        # Clamp X axis exactly to the data range (crucial for floats and 16-bit)
-        ax.set_xlim([x_min, x_max])
+        # Force the plot to show the full theoretical range when applicable
+        # For standard 8-bit images with exactly 256 bins, lock the X axis to [0, 256]
+        if mode not in ("I", "F") and not mode.startswith("I;16") and bins == 256:
+            ax.set_xlim([0, 256])
+        else:
+            # For dynamic depths (16-bit, float), respect the actual data boundaries
+            ax.set_xlim([plot_x_min, plot_x_max])
+            
         ax.set_ylim(bottom=0)
 
         # Configure aesthetics dynamically
@@ -172,6 +197,6 @@ class HistogramTool(ForensicsTool):
                 "Original Mode": mode,
                 "Bins": bins,
                 "Channels Plotted": len(histograms),
-                "Data Range": f"[{x_min:.1f}, {x_max:.1f}]"
+                "Active Data Range (Edges)": f"[{active_min_edge:.1f}, {active_max_edge:.1f}]"
             },
         )

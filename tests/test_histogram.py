@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import numpy as np
 from PIL import Image
@@ -7,17 +7,24 @@ from PIL import Image
 from forensics_app.core import ImageDocument
 from forensics_app.tools.histogram import HistogramTool, calculate_histograms
 
-
 class HistogramCalculationTests(unittest.TestCase):
-    def assert_counts(self, image, expected):
+    def assert_counts(self, image, expected, bins=256):
         original = image.tobytes()
-        histograms = calculate_histograms(image)
+        histograms = calculate_histograms(image, bins=bins)
+        
         self.assertEqual(list(histograms), list(expected))
-        for name, bins in expected.items():
-            counts = np.zeros(256, dtype=int)
-            for intensity, count in bins.items():
-                counts[intensity] = count
-            np.testing.assert_array_equal(histograms[name], counts)
+        for name, expected_bins in expected.items():
+            # Construir el array de conteos esperado
+            expected_counts = np.zeros(bins, dtype=int)
+            for intensity, count in expected_bins.items():
+                expected_counts[intensity] = count
+            
+            # Desempaquetar la nueva tupla (counts, edges)
+            counts, edges = histograms[name]
+            
+            np.testing.assert_array_equal(counts, expected_counts)
+            self.assertEqual(len(edges), bins + 1) # Los bordes siempre son N+1
+            
         self.assertEqual(image.tobytes(), original)
 
     def test_binary_white_pixels_use_bin_255(self):
@@ -62,12 +69,24 @@ class HistogramCalculationTests(unittest.TestCase):
                     "Blue": {30: 1, 200: 2}, "Alpha": alpha,
                 })
 
-    def test_unsupported_modes_are_rejected(self):
+    def test_high_depth_and_continuous_modes_are_supported(self):
+        # Asegurar que los modos matemáticos que antes fallaban ahora calculan dinámicamente
         for mode in ("I", "F", "I;16", "HSV", "YCbCr"):
             with self.subTest(mode=mode):
                 image = Image.new(mode, (2, 2))
-                with self.assertRaisesRegex(ValueError, "does not support image mode"):
-                    calculate_histograms(image)
+                histograms = calculate_histograms(image, bins=10)
+                self.assertTrue(len(histograms) > 0)
+                # Seleccionar el primer canal devuelto
+                counts, edges = list(histograms.values())[0]
+                self.assertEqual(len(counts), 10)
+                self.assertEqual(len(edges), 11)
+
+    def test_invalid_mode_is_rejected(self):
+        # Create a mock object that simulates an Image with an unsupported mode
+        mock_image = MagicMock()
+        mock_image.mode = "UNKNOWN_FORMAT"
+        with self.assertRaisesRegex(ValueError, "does not support image mode"):
+            calculate_histograms(mock_image)
 
 
 class HistogramToolTests(unittest.TestCase):
@@ -79,35 +98,85 @@ class HistogramToolTests(unittest.TestCase):
         with self.assertRaises(AssertionError):
             self.tool.run(None, self.document)
 
-    def test_supported_modes_plot_calculated_counts(self):
+    @patch("forensics_app.tools.histogram.simpledialog.askinteger", return_value=None)
+    def test_run_returns_none_when_dialog_cancelled(self, mock_ask):
+        self.document.current = Image.new("RGB", (2, 2))
+        self.assertIsNone(self.tool.run(None, self.document))
+
+    @patch("forensics_app.tools.histogram.simpledialog.askinteger", return_value=256)
+    def test_supported_modes_plot_calculated_counts(self, mock_ask):
         for mode in ("1", "L", "LA", "RGB", "RGBA", "P", "PA", "CMYK"):
             with self.subTest(mode=mode):
                 self.document.current = Image.new(mode, (2, 2))
-                expected = calculate_histograms(self.document.current)
+                expected = calculate_histograms(self.document.current, bins=256)
+                
                 with patch("matplotlib.axes.Axes.plot") as plot:
                     result = self.tool.run(None, self.document)
+                    
                 self.assertEqual(plot.call_count, len(expected))
-                for call, (name, counts) in zip(plot.call_args_list, expected.items()):
-                    np.testing.assert_array_equal(call.args[0], np.arange(256))
+                
+                for call, (name, (counts, edges)) in zip(plot.call_args_list, expected.items()):
+                    # Verificar que al plot se le pasan los centros geométricos, no los bordes
+                    bin_centers = (edges[:-1] + edges[1:]) / 2
+                    np.testing.assert_array_equal(call.args[0], bin_centers)
                     np.testing.assert_array_equal(call.args[1], counts)
                     self.assertEqual(call.kwargs["label"], name)
+                    
                 self.assertEqual(result.details["Channels Plotted"], len(expected))
                 self.assertEqual(result.details["Original Mode"], mode)
+                self.assertEqual(result.details["Bins"], 256)
                 self.assertTrue(result.preview_only)
 
-    def test_unsupported_mode_fails_before_plotting(self):
-        self.document.current = Image.new("F", (2, 2), 1000)
-        with patch("forensics_app.tools.histogram.Figure") as figure:
-            with self.assertRaises(ValueError):
-                self.tool.run(None, self.document)
-        figure.assert_not_called()
+    @patch("forensics_app.tools.histogram.simpledialog.askinteger", return_value=1024)
+    def test_dynamic_bins_adjust_plotting(self, mock_ask):
+        self.document.current = Image.new("I;16", (2, 2))
+        with patch("matplotlib.axes.Axes.plot") as plot:
+            result = self.tool.run(None, self.document)
+            
+        # Verificar que el array en el eje X tiene la longitud del bin dinámico pedido (1024)
+        x_axis_data = plot.call_args_list[0].args[0]
+        self.assertEqual(len(x_axis_data), 1024)
+        self.assertEqual(result.details["Bins"], 1024)
+    
+    @patch("forensics_app.tools.histogram.simpledialog.askinteger", return_value=256)
+    def test_active_data_range_calculation(self, mock_ask):
+        # --- Scenario 1: Restricted contrast image (low contrast) ---
+        # Create a gray image (128) and force a minimum of 50 and a maximum of 200
+        img_restricted = Image.new("L", (10, 10), color=128)
+        img_restricted.putpixel((0, 0), 50)
+        img_restricted.putpixel((9, 9), 200)
+        
+        self.document.current = img_restricted
+        
+        # Intercept plot so the test runs ultra-fast and doesn't attempt to draw anything real
+        with patch("matplotlib.axes.Axes.plot"):
+            result_restricted = self.tool.run(None, self.document)
+            
+        self.assertIsNotNone(result_restricted)
+        # Pixel 200 falls into the [200.0, 201.0) bin, so the upper edge must be 201.0
+        self.assertEqual(result_restricted.details["Active Data Range (Edges)"], "[50.0, 201.0]")
+        
+        # --- Scenario 2: Full range image ---
+        # Modify the image to include pure black (0) and pure white (255)
+        img_full = img_restricted.copy()
+        img_full.putpixel((0, 1), 0)
+        img_full.putpixel((9, 8), 255)
+        
+        self.document.current = img_full
+        
+        with patch("matplotlib.axes.Axes.plot"):
+            result_full = self.tool.run(None, self.document)
+            
+        self.assertIsNotNone(result_full)
+        # Pixel 255 falls into the [255.0, 256.0) bin, so the upper edge must be 256.0
+        self.assertEqual(result_full.details["Active Data Range (Edges)"], "[0.0, 256.0]")
 
-    def test_output_image_dimensions_and_type(self):
+    @patch("forensics_app.tools.histogram.simpledialog.askinteger", return_value=256)
+    def test_output_image_dimensions_and_type(self, mock_ask):
         self.document.current = Image.new("L", (2, 2), color=0)
         source = self.document.current
         result = self.tool.run(None, self.document)
-        # Check that the output image has the expected size and mode 
-        # fig is created with figsize=(8, 6) and dpi=100 by default, so the output image size is (800, 600)
+        
         self.assertEqual(result.image.size, (800, 600))
         self.assertEqual(result.image.mode, "RGBA")
         self.assertIs(self.document.current, source)
