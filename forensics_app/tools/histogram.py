@@ -216,6 +216,6 @@ class HistogramTool(ForensicsTool):
                 "Original Mode": mode,
                 "Bins": bins,
                 "Channels Plotted": len(histograms),
-                "Active Data Range (Edges)": f"[{active_min_edge:.1f}, {active_max_edge:.1f}]"
+                "Active Data Range (Edges)": f"[{active_min_edge:g}, {active_max_edge:g}]"
             },
         )

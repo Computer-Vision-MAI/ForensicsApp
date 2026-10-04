@@ -212,7 +212,7 @@ class HistogramToolTests(unittest.TestCase):
             
         self.assertIsNotNone(result_restricted)
         # Pixel 200 falls into the [200.0, 201.0) bin, so the upper edge must be 201.0
-        self.assertEqual(result_restricted.details["Active Data Range (Edges)"], "[50.0, 201.0]")
+        self.assertEqual(result_restricted.details["Active Data Range (Edges)"], "[50, 201]")
         
         # --- Scenario 2: Full range image ---
         # Modify the image to include pure black (0) and pure white (255)
@@ -227,7 +227,7 @@ class HistogramToolTests(unittest.TestCase):
             
         self.assertIsNotNone(result_full)
         # Pixel 255 falls into the [255.0, 256.0) bin, so the upper edge must be 256.0
-        self.assertEqual(result_full.details["Active Data Range (Edges)"], "[0.0, 256.0]")
+        self.assertEqual(result_full.details["Active Data Range (Edges)"], "[0, 256]")
 
     @patch("forensics_app.tools.histogram.simpledialog.askinteger", return_value=256)
     def test_output_image_dimensions_and_type(self, mock_ask):
@@ -238,6 +238,47 @@ class HistogramToolTests(unittest.TestCase):
         self.assertEqual(result.image.size, (800, 600))
         self.assertEqual(result.image.mode, "RGBA")
         self.assertIs(self.document.current, source)
+    
+    def test_active_data_range_with_no_active_bins(self):
+        # Create an image with all pixels set to a single value (e.g., 128)
+        img = Image.new("L", (10, 10), color=128)
+        self.document.current = img
+        
+        with patch("forensics_app.tools.histogram.simpledialog.askinteger", return_value=256):
+            with patch("matplotlib.axes.Axes.plot"):
+                result = self.tool.run(None, self.document)
+                
+        self.assertIsNotNone(result)
+        # Since all pixels are the same, the active range should be [128, 129]
+        self.assertEqual(result.details["Active Data Range (Edges)"], "[128, 129]")
+    
+    
+    def test_active_range_decimal_precision(self):
+        # Create an image with floating point values that have decimal precision
+        float_data = np.array([[0.1, 0.2], [0.3, 0.4]], dtype=np.float32)
+        img = Image.fromarray(float_data)
+        self.document.current = img
+        
+        with patch("forensics_app.tools.histogram.simpledialog.askinteger", return_value=256):
+            with patch("matplotlib.axes.Axes.plot"):
+                result = self.tool.run(None, self.document)
+                
+        self.assertIsNotNone(result)
+        # The active range should reflect the min and max of the data
+        self.assertEqual(result.details["Active Data Range (Edges)"], "[0.1, 0.4]")
+
+        float_data = np.array([[0.123456, 0.234567], [0.345678, 0.456789]], dtype=np.float32)
+        img = Image.fromarray(float_data)
+        self.document.current = img
+        
+        with patch("forensics_app.tools.histogram.simpledialog.askinteger", return_value=256):
+            with patch("matplotlib.axes.Axes.plot"):
+                result = self.tool.run(None, self.document)
+        
+        self.assertIsNotNone(result)
+        # The active range should reflect the min and max of the data with appropriate precision
+        self.assertEqual(result.details["Active Data Range (Edges)"], "[0.123456, 0.456789]")
+
 
 
 if __name__ == "__main__":

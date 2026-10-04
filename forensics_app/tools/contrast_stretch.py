@@ -46,15 +46,27 @@ def apply_contrast_enhancement(img: Image.Image, method: str, clip_percent: int)
             float_img = img_as_float(img_array[..., :3])
     else:
         if is_high_depth:
-            # Explicit conversion required: load raw data without Pillow clipping to 255
+            # Load raw data without Pillow clipping to 255
             raw_array = np.asarray(img, dtype=np.float64)
-            c_min = np.min(raw_array)
-            c_max = np.max(raw_array)
             
-            # Manually normalize to [0, 1] and avoid division by zero
-            if c_max > c_min:
-                float_img = (raw_array - c_min) / (c_max - c_min)
+            # 1. Identify valid pixels so corrupted data doesn't skew the true min/max
+            valid_mask = np.isfinite(raw_array)
+            
+            if np.any(valid_mask):
+                c_min = np.min(raw_array[valid_mask])
+                c_max = np.max(raw_array[valid_mask])
+                
+                # 2. Neutralize non-finite values safely using the true boundaries
+                # NaNs and -Infs become the minimum (renders as black), +Infs become the maximum (white)
+                raw_array = np.nan_to_num(raw_array, nan=c_min, posinf=c_max, neginf=c_min)
+                
+                # 3. Normalize manually to [0, 1]
+                if c_max > c_min:
+                    float_img = (raw_array - c_min) / (c_max - c_min)
+                else:
+                    float_img = np.zeros_like(raw_array)
             else:
+                # If the image is entirely corrupted (all NaNs/Infs), output a black safe image
                 float_img = np.zeros_like(raw_array)
         elif is_grayscale:
             img = img.convert("L")

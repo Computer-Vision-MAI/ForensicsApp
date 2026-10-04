@@ -171,6 +171,19 @@ class ContrastStretchFunctionTests(unittest.TestCase):
         img = Image.new("RGB", (2, 2), color=(100, 100, 100))
         with self.assertRaisesRegex(ValueError, "Unsupported contrast enhancement method"):
             apply_contrast_enhancement(img, method="invalid_method", clip_percent=0)
+    
+    def test_nan_values_in_high_depth_image_are_handled(self) -> None:
+        # Create a high-depth image with NaN and Inf values
+        float_data = np.array([[np.nan, 1.0], [2.0, np.inf]], dtype=np.float32)
+        img = Image.fromarray(float_data)
+        
+        result = apply_contrast_enhancement(img, method="percentile", clip_percent=0)
+        result_arr = np.array(result)
+        
+        self.assertEqual(result.mode, "L")
+        # The NaN should be mapped to the minimum (0), Inf to maximum (255)
+        self.assertEqual(result_arr[0, 0], 0)   # NaN -> 0
+        self.assertEqual(result_arr[1, 1], 255) # Inf -> 255
 
 class ContrastStretchToolTests(unittest.TestCase):
     """Unit tests for the ContrastStretchTool wrapper and UI integration."""
