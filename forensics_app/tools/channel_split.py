@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import simpledialog
 
 import numpy as np
 from PIL import Image
 
 from forensics_app.core import ImageDocument
+from forensics_app.core.channels import MODE_CHANNELS, to_multichannel
 from .base import ForensicsTool, ToolResult
-
-CHANNEL_NAMES = ("Red", "Green", "Blue")
+from .dialogs import ask_choice
 
 
 class ChannelSplitTool(ForensicsTool):
@@ -23,34 +22,30 @@ class ChannelSplitTool(ForensicsTool):
     def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult | None:
         assert document.current is not None
 
-        if Image.getmodebase(document.current.mode) == "L":
-            raise ValueError(
-                f"The image is grayscale ({document.current.mode}). "
-                "Use Undo or Reset to go back to the color image."
-            )
+        image = to_multichannel(document.current)
+        names = MODE_CHANNELS[image.mode]
 
-        channel_index = simpledialog.askinteger(
-            "Select channel",
-            "Enter channel index (0 for Red, 1 for Green, 2 for Blue):",
-            minvalue=0,
-            maxvalue=2,
-            parent=parent,
+        channel_index = ask_choice(
+            parent,
+            "Split channels",
+            f"Channel to extract ({image.mode}):",
+            names,
         )
         if channel_index is None:
             return None
 
-        # convert() drops alpha without blending, so channel values stay the originals
-        image_array = np.asarray(document.current.convert("RGB"))
+        image_array = np.asarray(image)
 
         channel = extract_channel(image_array, channel_index)
         output = Image.fromarray(channel)
 
-        name = CHANNEL_NAMES[channel_index]
+        name = names[channel_index]
         return ToolResult(
             image=output,
             message=f"Extracted the {name} channel.",
             details={
                 "Operation": "Channel split",
+                "Source mode": image.mode,
                 "Channel": name,
                 **channel_statistics(channel),
             },
@@ -67,15 +62,14 @@ def channel_statistics(channel: np.ndarray) -> dict[str, int | float]:
 
 
 def extract_channel(array: np.ndarray, index: int) -> np.ndarray:
-    """Return channel ``index`` (0=Red, 1=Green, 2=Blue) of an RGB array as a 2D array.
+    """Return channel ``index`` of a (height, width, channels) array as a 2D array.
 
-    Raises ValueError if the array is not (height, width, 3) or the index is not 0, 1, or 2.
+    Raises ValueError if the array has no channel axis or the index is out of range.
     """
-
-    if array.ndim != 3 or array.shape[2] != 3:
-        raise ValueError("Expected an RGB image array with shape (height, width, 3).")
-    # Explicit check: NumPy would silently accept -1 and return the Blue channel
-    if index < 0 or index > 2:
-        raise ValueError("Channel index must be 0 (Red), 1 (Green), or 2 (Blue).")
-
+    if array.ndim != 3:
+        raise ValueError("Expected a (height, width, channels) array.")
+    channel_count = array.shape[2]
+    # Explicit check, NumPy would silently accept -1 and return the last channel.
+    if not 0 <= index < channel_count:
+        raise ValueError(f"Channel index {index} must be between 0 and {channel_count - 1}.")
     return array[:, :, index]

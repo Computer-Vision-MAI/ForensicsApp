@@ -71,5 +71,35 @@ class MainWindowToolTests(unittest.TestCase):
         self.assertEqual(document.current.tobytes(), source.tobytes())
 
 
+class PixelHoverTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.window = MainWindow.__new__(MainWindow)
+        self.window.document = ImageDocument()
+        self.window.document.current = Image.new("RGB", (3, 2), "red")
+        self.window.image_view = MagicMock(image=Image.new("RGBA", (800, 600), (0, 0, 255, 255)))
+        self.window.pixel_info = MagicMock()
+        self.window.pixel_swatch = MagicMock()
+        self.window._swatch_idle = "gray"
+
+    def test_hover_reads_the_displayed_preview_not_the_document(self) -> None:
+        self.window._on_pixel_hover((700, 500))  # outside the 3x2 document image
+
+        self.assertIn("RGBA (0, 0, 255, 255)", self.window.pixel_info.set.call_args.args[0])
+        self.window.pixel_swatch.configure.assert_called_with(background="#0000ff")
+
+    def test_hover_outside_image_resets_the_inspector(self) -> None:
+        self.window._on_pixel_hover(None)
+
+        self.window.pixel_info.set.assert_called_with("Hover over the image to inspect pixels.")
+        self.window.pixel_swatch.configure.assert_called_with(background="gray")
+
+    def test_numeric_image_shows_value_without_swatch(self) -> None:
+        self.window.image_view = MagicMock(image=Image.new("F", (2, 2), 0.5))
+        self.window._on_pixel_hover((1, 1))
+
+        self.window.pixel_info.set.assert_called_with("x 1, y 1 | F 0.500")
+        self.window.pixel_swatch.configure.assert_called_with(background="gray")
+
+
 if __name__ == "__main__":
     unittest.main()

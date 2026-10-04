@@ -11,7 +11,7 @@ from forensics_app.tools.channel_split import (
     extract_channel,
 )
 
-ASK_CHANNEL = "forensics_app.tools.channel_split.simpledialog.askinteger"
+ASK_CHANNEL = "forensics_app.tools.channel_split.ask_choice"
 
 
 class ChannelSplitTests(unittest.TestCase):
@@ -33,9 +33,16 @@ class ChannelSplitTests(unittest.TestCase):
 
     def test_rejects_invalid_index(self) -> None:
         array = np.zeros((2, 2, 3), dtype=np.uint8)
-        for bad_index in (-1, 100):
+        for bad_index in (-1, 3):
             with self.assertRaises(ValueError):
                 extract_channel(array, bad_index)
+
+    def test_extracts_from_any_channel_count(self) -> None:
+        array = np.zeros((2, 2, 4), dtype=np.uint8)
+        array[:, :, 3] = 40
+        self.assertTrue(np.all(extract_channel(array, 3) == 40))
+        with self.assertRaises(ValueError):
+            extract_channel(array, 4)
 
     def test_channel_statistics(self) -> None:
         channel = np.array([[0, 10], [20, 255]], dtype=np.uint8)
@@ -72,9 +79,31 @@ class ChannelSplitToolTests(unittest.TestCase):
                 result = ChannelSplitTool().run(None, self.document)
                 self.assertTrue(np.all(np.asarray(result.image) == 30))
 
+    def test_extracts_alpha_channel(self) -> None:
+        with patch(ASK_CHANNEL, return_value=3):
+            result = ChannelSplitTool().run(None, self.document)
+        self.assertTrue(np.all(np.asanyarray(result.image) == 128))
+        self.assertEqual(result.details["Channel"], "Alpha")
+
+    def test_extracts_cmyk_black_channel(self) -> None:
+        self.document.current = Image.new("CMYK", (4, 3), (10, 20, 30, 40))
+        with patch(ASK_CHANNEL, return_value=3):
+            result = ChannelSplitTool().run(None, self.document)
+        self.assertTrue(np.all(np.asanyarray(result.image) == 40))
+        self.assertEqual(result.details["Channel"], "Black")
+        self.assertEqual(result.details["Source mode"], "CMYK")
+
+    def test_offers_expanded_names_for_palette_images(self) -> None:
+        palette_image = Image.new("P", (4, 3), 0)
+        palette_image.putpalette([10, 20, 30])
+        self.document.current = palette_image
+        with patch(ASK_CHANNEL, return_value=0) as ask:
+            ChannelSplitTool().run(None, self.document)
+        self.assertEqual(ask.call_args[0][3], ("Red", "Green", "Blue"))
+
     def test_rejects_grayscale_modes(self) -> None:
         tool = ChannelSplitTool()
-        for mode in ("1", "L", "LA", "I", "F"):
+        for mode in ("1", "L", "I", "F", "I;16"):
             self.document.current = Image.new(mode, (4, 3))
             with self.subTest(mode=mode), self.assertRaises(ValueError):
                 tool.run(None, self.document)
