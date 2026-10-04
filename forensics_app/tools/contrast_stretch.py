@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import simpledialog
 import numpy as np
 from PIL import Image
 import warnings
@@ -8,23 +8,29 @@ import warnings
 from skimage import exposure, color, img_as_float, img_as_ubyte
 
 from .dialogs import ask_choice
-from tkinter import simpledialog
 
 from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
 
 
 
+import warnings
+import numpy as np
+from PIL import Image
+from skimage import exposure, color, img_as_float, img_as_ubyte
+
 def apply_contrast_enhancement(img: Image.Image, method: str, clip_percent: int) -> Image.Image:
-    """Mejora el contraste protegiendo los colores en LAB o directamente en Grayscale."""
+    """Enhances contrast by protecting colors in LAB and preserving range in high-depth modes."""
     mode = img.mode
     
-    # 1. Detectar si la imagen es monocromática
-    is_grayscale = mode in ("L", "LA", "1", "I", "F")
+    # 1. Detect image categories
+    is_high_depth = mode in ("I", "F") or mode.startswith("I;16")
+    is_grayscale = mode in ("L", "LA", "1") or is_high_depth
     
-    # 2. Extraer el canal alfa de forma segura
+    # 2. Extract alpha channel and normalize working array to float [0, 1]
     has_alpha = False
     alpha_channel = None
+    float_img = None
     
     if mode in ("RGBA", "LA", "PA") or "transparency" in img.info:
         has_alpha = True
@@ -32,32 +38,39 @@ def apply_contrast_enhancement(img: Image.Image, method: str, clip_percent: int)
             img = img.convert("LA")
             img_array = np.array(img)
             alpha_channel = img_array[..., 1]
-            work_array = img_array[..., 0]
+            float_img = img_as_float(img_array[..., 0])
         else:
             img = img.convert("RGBA")
             img_array = np.array(img)
             alpha_channel = img_array[..., 3]
-            work_array = img_array[..., :3]
+            float_img = img_as_float(img_array[..., :3])
     else:
-        if is_grayscale:
+        if is_high_depth:
+            # Explicit conversion required: load raw data without Pillow clipping to 255
+            raw_array = np.asarray(img, dtype=np.float64)
+            c_min = np.min(raw_array)
+            c_max = np.max(raw_array)
+            
+            # Manually normalize to [0, 1] and avoid division by zero
+            if c_max > c_min:
+                float_img = (raw_array - c_min) / (c_max - c_min)
+            else:
+                float_img = np.zeros_like(raw_array)
+        elif is_grayscale:
             img = img.convert("L")
-            work_array = np.array(img)
+            float_img = img_as_float(np.array(img))
         else:
             img = img.convert("RGB")
-            work_array = np.array(img)
+            float_img = img_as_float(np.array(img))
 
-    # 3. Convertir a float en el rango [0, 1] de forma nativa
-    float_img = img_as_float(work_array)
-
-    # 4. Preparar el canal objetivo y normalizar a [0, 1] para skimage
+    # 3. Prepare target channel for scikit-image
     if is_grayscale:
         target_channel = float_img
     else:
         lab_image = color.rgb2lab(float_img)
-        # Normalizar el canal L (0-100) a [0, 1] para que las matemáticas no colapsen
         target_channel = lab_image[..., 0] / 100.0
 
-    # 5. Aplicar el algoritmo (ahora target_channel SIEMPRE está entre 0.0 y 1.0)
+    # 4. Apply the selected mathematical algorithm
     if method == "percentile":
         p_low, p_high = np.percentile(target_channel, (clip_percent, 100 - clip_percent))
         enhanced = exposure.rescale_intensity(
@@ -65,43 +78,32 @@ def apply_contrast_enhancement(img: Image.Image, method: str, clip_percent: int)
             in_range=(p_low, p_high), 
             out_range=(0, 1)
         )
-        
     elif method == "equalize":
         enhanced = exposure.equalize_hist(target_channel)
-            
     elif method == "adaptive":
         enhanced = exposure.equalize_adapthist(target_channel, clip_limit=0.03)
-            
     else:
-        enhanced = target_channel
+        raise ValueError(f"Unsupported contrast enhancement method: '{method}'")
 
-    # 6. Reconstruir la imagen y empaquetar en 8-bits
+    # 5. Reconstruct the image and pack into 8-bits
     if is_grayscale:
         final_8bit = img_as_ubyte(enhanced)
         output_mode = "LA" if has_alpha else "L"
     else:
-        # Restaurar el rango correcto del espacio LAB [0, 100]
         lab_image[..., 0] = enhanced * 100.0
-        
-        # Ignorar de forma segura el warning de out-of-gamut al transformar a RGB
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             enhanced_rgb = color.lab2rgb(lab_image)
-            
         final_8bit = img_as_ubyte(enhanced_rgb)
         output_mode = "RGBA" if has_alpha else "RGB"
 
-    # 7. Reensamblar el canal Alfa si existía
+    # 6. Reassemble the Alpha channel if it existed
     if has_alpha:
         final_array = np.dstack((final_8bit, alpha_channel))
     else:
         final_array = final_8bit
 
     out_image = Image.fromarray(final_array, mode=output_mode)
-    
-    # Mantener el modo base para casos exóticos
-    if mode in ("1", "I", "F"):
-        out_image = out_image.convert("L")
 
     return out_image
 
@@ -114,7 +116,7 @@ class ContrastStretchTool(ForensicsTool):
     def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult | None:
         assert document.current is not None
         
-        # 1. Seleccionar el modo usando el ChoiceDialog reutilizable
+        # 1. Ask the user to select the contrast enhancement method
         options = ("Percentile Stretching", "Histogram Equalization", "Adaptive (CLAHE)")
         methods = ("percentile", "equalize", "adaptive")
         
@@ -126,12 +128,12 @@ class ContrastStretchTool(ForensicsTool):
         )
         
         if choice_idx is None:
-            return None  # El usuario canceló el diálogo
+            return None  # User canceled the method selection dialog
             
         method = methods[choice_idx]
         percent = 0
         
-        # 2. Si es percentil, encadenar un segundo diálogo para el porcentaje
+        # 2. If it's percentile, chain a second dialog for the percentage
         if method == "percentile":
             percent = simpledialog.askinteger(
                 "Clip Percentage",
@@ -142,9 +144,9 @@ class ContrastStretchTool(ForensicsTool):
                 parent=parent
             )
             if percent is None:
-                return None  # El usuario canceló el input del porcentaje
+                return None  # User canceled the percentage input dialog
         
-        # 3. Aplicar la transformación matemática
+        # 3. Apply the mathematical transformation
         out_image = apply_contrast_enhancement(document.current, method, percent)
         
         return ToolResult(

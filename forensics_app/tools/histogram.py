@@ -37,16 +37,26 @@ CHANNEL_NAMES = {
 def get_channel_color(name: str, index: int) -> str:
     """Assigns a visual color to the plot line based on the channel's name semantics."""
     name_lower = name.lower()
-    if "red" in name_lower and "difference" not in name_lower: return "red"
-    if "green" in name_lower and "red" not in name_lower: return "green"
-    if "blue" in name_lower and "difference" not in name_lower: return "blue"
-    if "alpha" in name_lower or "padding" in name_lower: return "gray"
-    if "cyan" in name_lower: return "cyan"
-    if "magenta" in name_lower: return "magenta"
-    if "yellow" in name_lower: return "y"
-    if "hue" in name_lower: return "purple"
-    if "saturation" in name_lower: return "orange"
-    if any(k in name_lower for k in ("intensity", "luma", "lightness", "value", "black", "binary")): return "black"
+    if "red" in name_lower and "difference" not in name_lower: 
+        return "red"
+    if "green" in name_lower and "red" not in name_lower: 
+        return "green"
+    if "blue" in name_lower and "difference" not in name_lower: 
+        return "blue"
+    if "alpha" in name_lower or "padding" in name_lower: 
+        return "gray"
+    if "cyan" in name_lower: 
+        return "cyan"
+    if "magenta" in name_lower: 
+        return "magenta"
+    if "yellow" in name_lower: 
+        return "y"
+    if "hue" in name_lower: 
+        return "purple"
+    if "saturation" in name_lower: 
+        return "orange"
+    if any(k in name_lower for k in ("intensity", "luma", "lightness", "value", "black", "binary")): 
+        return "black"
     
     # Fallback palette for unknown exotic channels
     return [f"tab:{c}" for c in ["blue", "orange", "green", "red", "purple", "brown", "pink", "gray", "olive", "cyan"]][index % 10]
@@ -84,6 +94,12 @@ def calculate_histograms(image: Image.Image, bins: int = 256) -> dict[str, tuple
     results = {}
     for index, name in enumerate(channels):
         channel_data = img_array[:, index]
+
+        # Clean floating-point arrays before binning
+        if original_mode == "F":
+            channel_data = channel_data[np.isfinite(channel_data)]
+            if channel_data.size == 0:
+                raise ValueError(f"Cannot generate histogram: Channel '{name}' contains no finite values.")
         
         # np.histogram handles floats, negatives, and large ints naturally
         if is_standard_8bit:
@@ -165,7 +181,10 @@ class HistogramTool(ForensicsTool):
             plot_x_min = min(plot_x_min, edges[0])
             plot_x_max = max(plot_x_max, edges[-1])
 
-        ax.legend(loc="upper right")
+        # Check if there are any artists (lines) plotted before creating the legend
+        handles, labels = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend(loc="upper right")
         
         # Force the plot to show the full theoretical range when applicable
         # For standard 8-bit images with exactly 256 bins, lock the X axis to [0, 256]

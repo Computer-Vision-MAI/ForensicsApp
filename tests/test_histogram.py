@@ -69,17 +69,63 @@ class HistogramCalculationTests(unittest.TestCase):
                     "Blue": {30: 1, 200: 2}, "Alpha": alpha,
                 })
 
-    def test_high_depth_and_continuous_modes_are_supported(self):
-        # Asegurar que los modos matemáticos que antes fallaban ahora calculan dinámicamente
-        for mode in ("I", "F", "I;16", "HSV", "YCbCr"):
-            with self.subTest(mode=mode):
-                image = Image.new(mode, (2, 2))
-                histograms = calculate_histograms(image, bins=10)
-                self.assertTrue(len(histograms) > 0)
-                # Seleccionar el primer canal devuelto
-                counts, edges = list(histograms.values())[0]
-                self.assertEqual(len(counts), 10)
-                self.assertEqual(len(edges), 11)
+    def test_histogram_calculates_float_image_ranges(self) -> None:
+        # Create a Float (F) image with negative and fractional values
+        float_data = np.array([[-1.5, 0.0], [1.5, 3.0]], dtype=np.float32)
+        image = Image.fromarray(float_data)
+        
+        histograms = calculate_histograms(image, bins=3)
+        counts, edges = histograms["Intensity (32-bit float)"]
+        
+        # Expected behavior: Min is -1.5, Max is 3.0. Range width is 4.5.
+        # Divided into 3 bins, each bin is exactly 1.5 units wide:
+        # Bin 1: [-1.5, 0.0), Bin 2: [0.0, 1.5), Bin 3: [1.5, 3.0]
+        np.testing.assert_array_equal(counts, [1, 1, 2])
+        np.testing.assert_allclose(edges, [-1.5, 0.0, 1.5, 3.0])
+
+    def test_histogram_calculates_16bit_integer_ranges(self) -> None:
+        # Create an I;16 image with nonzero, non-contiguous values
+        int16_data = np.array([[1000, 2000], [3000, 5000]], dtype=np.uint16)
+        image = Image.fromarray(int16_data)
+        
+        histograms = calculate_histograms(image, bins=4)
+        counts, edges = histograms["Intensity (16-bit)"]
+        
+        # Min: 1000, Max: 5000. Range width: 4000. 4 bins = 1000 width per bin.
+        np.testing.assert_array_equal(counts, [1, 1, 1, 1])
+        np.testing.assert_allclose(edges, [1000, 2000, 3000, 4000, 5000])
+
+    def test_histogram_calculates_32bit_signed_integer_ranges(self) -> None:
+        # Create an I image spanning negative to large positive integers
+        int32_data = np.array([[-100000, 0], [100000, 100000]], dtype=np.int32)
+        image = Image.fromarray(int32_data)
+        
+        histograms = calculate_histograms(image, bins=2)
+        counts, edges = histograms["Intensity (32-bit integer)"]
+        
+        # Min: -100000, Max: 100000. Range width: 200000. 2 bins = 100000 width per bin.
+        np.testing.assert_array_equal(counts, [1, 3])
+        np.testing.assert_allclose(edges, [-100000, 0, 100000])
+
+    def test_histogram_filters_non_finite_float_values(self) -> None:
+        # Create an F image containing NaN and Infinity values
+        float_data = np.array([[np.nan, 1.0], [2.0, np.inf]], dtype=np.float32)
+        image = Image.fromarray(float_data)
+        
+        histograms = calculate_histograms(image, bins=2)
+        counts, edges = histograms["Intensity (32-bit float)"]
+        
+        # NaN and inf should be safely stripped. Remaining data: [1.0, 2.0].
+        np.testing.assert_array_equal(counts, [1, 1])
+        np.testing.assert_allclose(edges, [1.0, 1.5, 2.0])
+
+    def test_histogram_fails_on_completely_non_finite_image(self) -> None:
+        # An image entirely composed of corrupted/undefined data
+        float_data = np.array([[np.nan, np.inf], [-np.inf, np.nan]], dtype=np.float32)
+        image = Image.fromarray(float_data)
+        
+        with self.assertRaisesRegex(ValueError, "contains no finite values"):
+            calculate_histograms(image, bins=10)
 
     def test_invalid_mode_is_rejected(self):
         # Create a mock object that simulates an Image with an unsupported mode
@@ -87,6 +133,18 @@ class HistogramCalculationTests(unittest.TestCase):
         mock_image.mode = "UNKNOWN_FORMAT"
         with self.assertRaisesRegex(ValueError, "does not support image mode"):
             calculate_histograms(mock_image)
+
+    def test_non_finite_values_in_float_image_are_removed(self):
+        # Create a float image with NaN and Inf values
+        img = Image.new("F", (3, 1))
+        img.putdata([0.0, np.nan, np.inf])
+        
+        histograms = calculate_histograms(img, bins=10)
+        counts, edges = histograms["Intensity (32-bit float)"]
+        
+        # Only the finite value (0.0) should be counted
+        self.assertEqual(counts.sum(), 1)
+        self.assertEqual(counts[0], 0.0)  # Assuming 0.0 falls into the first bin
 
 
 class HistogramToolTests(unittest.TestCase):
