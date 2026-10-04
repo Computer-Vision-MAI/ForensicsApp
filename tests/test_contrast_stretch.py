@@ -77,6 +77,59 @@ class ContrastStretchFunctionTests(unittest.TestCase):
         self.assertEqual(result_arr[0, 0], 0)   # NaN -> 0
         self.assertEqual(result_arr[1, 1], 255) # Inf -> 255
 
+    def test_native_hsv_stretching(self) -> None:
+        # Base color with a dark and bright pixel to force stretching
+        img = Image.new("HSV", (2, 2), color=(120, 100, 128))
+        img.putpixel((0, 0), (120, 100, 50))   # Lowest Value
+        img.putpixel((1, 1), (120, 100, 200))  # Highest Value
+        
+        result = apply_contrast_enhancement(img, method="percentile", clip_percent=0)
+        result_arr = np.array(result)
+        
+        self.assertEqual(result.mode, "HSV")
+        
+        # Hue (0) and Saturation (1) must remain mathematically identical
+        self.assertTrue(np.all(result_arr[..., 0] == 120))
+        self.assertTrue(np.all(result_arr[..., 1] == 100))
+        
+        # Value (2) should be stretched to absolute min/max bounds (50->0, 200->255)
+        self.assertEqual(result_arr[0, 0, 2], 0)
+        self.assertEqual(result_arr[1, 1, 2], 255)
+
+    def test_native_ycbcr_stretching(self) -> None:
+        # Base color with a dark and bright pixel
+        img = Image.new("YCbCr", (2, 2), color=(128, 100, 150))
+        img.putpixel((0, 0), (50, 100, 150))   # Lowest Luma
+        img.putpixel((1, 1), (200, 100, 150))  # Highest Luma
+        
+        result = apply_contrast_enhancement(img, method="percentile", clip_percent=0)
+        result_arr = np.array(result)
+        
+        self.assertEqual(result.mode, "YCbCr")
+        
+        # Luma (Y - index 0) should be stretched (50->0, 200->255)
+        self.assertEqual(result_arr[0, 0, 0], 0)
+        self.assertEqual(result_arr[1, 1, 0], 255)
+        
+        # Cb (1) and Cr (2) must remain mathematically identical
+        self.assertTrue(np.all(result_arr[..., 1] == 100))
+        self.assertTrue(np.all(result_arr[..., 2] == 150))
+
+    def test_lab_mode_processing(self) -> None:
+        # LAB falls to the standard branch, converting safely to RGB on output
+        img = Image.new("LAB", (2, 2), color=(100, 5, 5))
+        img.putpixel((0, 0), (50, 5, 5))
+        img.putpixel((1, 1), (200, 5, 5))
+        
+        result = apply_contrast_enhancement(img, method="percentile", clip_percent=0)
+        
+        # Because we reconstruct LAB via standard color.lab2rgb, it outputs RGB
+        self.assertEqual(result.mode, "LAB")
+        # Luminance channel should be stretched to full range (50->0, 200->255)
+        result_arr = np.array(result)
+        self.assertEqual(result_arr[0, 0, 0], 0)
+        self.assertEqual(result_arr[1, 1, 0], 255)
+
 class ContrastStretchToolTests(unittest.TestCase):
     """Unit tests for the ContrastStretchTool wrapper and UI integration."""
     

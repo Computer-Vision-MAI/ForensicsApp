@@ -16,12 +16,23 @@ def extract_target_channel(
         - alpha_channel: The alpha mask if present, otherwise None.
     """
     mode = img.mode
+    
+    # 1. Enforce strict allowlist covering all recognized Pillow modes
+    supported_modes = {
+        "1", "L", "I", "F", "P", "PA", "RGB", "CMYK", 
+        "LAB", "RGBA", "RGBX", "RGBa", "LA", "La"
+    }
+    if mode not in supported_modes and not mode.startswith("I;16"):
+        raise ValueError(f"Unsupported image mode: '{mode}'. Cannot safely extract channels.")
+
     is_high_depth = mode in ("I", "F") or mode.startswith("I;16")
-    has_alpha = mode in ("RGBA", "LA", "PA") or "transparency" in img.info
+    
+    # 2. Safely detect all alpha-bearing modes
+    has_alpha = mode in ("RGBA", "LA", "PA", "RGBa", "La") or "transparency" in img.info
     
     alpha_channel = None
     
-    # 1. Get raw normalized float data [0, 1]
+    # 3. Get raw normalized float data [0, 1]
     if is_high_depth:
         raw_array = np.asarray(img, dtype=np.float64)
         valid_mask = np.isfinite(raw_array)
@@ -42,6 +53,8 @@ def extract_target_channel(
             float_img = color.gray2rgb(float_img)
             
     else:
+        # Pillow safely converts exotic modes (CMYK, YCbCr, HSV, RGBX) to RGB/RGBA here.
+        # This keeps the math explicit and guarantees the LAB conversion later won't fail.
         if has_alpha:
             if as_grayscale:
                 arr = np.array(img.convert("LA"))
@@ -57,7 +70,7 @@ def extract_target_channel(
             else:
                 float_img = img_as_float(np.array(img.convert("RGB")))
 
-    # 2. Map to the correct color space channel
+    # 4. Map to the correct color space channel
     if as_grayscale:
         return float_img, None, alpha_channel
     else:

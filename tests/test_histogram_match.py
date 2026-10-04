@@ -61,6 +61,63 @@ class HistogramMatchFunctionTests(unittest.TestCase):
         self.assertEqual(result.mode, "RGB")
         self.assertEqual(result.size, (2, 2))
 
+    def test_native_hsv_matching(self) -> None:
+        base_img = Image.new("HSV", (2, 2), color=(120, 100, 50))  # Very dark image
+        ref_img = Image.new("RGB", (2, 2), color=(50, 200, 200))   # Very bright reference
+        
+        result = apply_histogram_match(base_img, ref_img)
+        result_arr = np.array(result)
+        
+        self.assertEqual(result.mode, "HSV")
+        
+        # Hue and Saturation must remain strictly from the BASE image
+        self.assertTrue(np.all(result_arr[..., 0] == 120))
+        self.assertTrue(np.all(result_arr[..., 1] == 100))
+        
+        # Value (2) must be pulled heavily toward the bright reference
+        self.assertTrue(np.all(result_arr[..., 2] > 150))
+
+    def test_native_ycbcr_matching_with_rgb_reference(self) -> None:
+        base_img = Image.new("YCbCr", (2, 2), color=(50, 100, 150))  # Dark YCbCr image
+        ref_img = Image.new("RGB", (2, 2), color=(200, 200, 200))    # Bright RGB reference
+        
+        result = apply_histogram_match(base_img, ref_img)
+        result_arr = np.array(result)
+        
+        self.assertEqual(result.mode, "YCbCr")
+        
+        # Cb (1) and Cr (2) must remain strictly from the BASE image
+        self.assertTrue(np.all(result_arr[..., 1] == 100))
+        self.assertTrue(np.all(result_arr[..., 2] == 150))
+        
+        # Luma (Y - index 0) must be pulled toward the bright RGB reference
+        self.assertTrue(np.all(result_arr[..., 0] > 150))
+
+    def test_lab_mode_matching(self) -> None:
+        base_img = Image.new("LAB", (2, 2), color=(50, 5, 5))
+        ref_img = Image.new("RGB", (2, 2), color=(200, 200, 200))
+
+        # 1. We extract the raw array of the base image to compare channels later 
+        # as the np array of the LAB mode where the A B values from -128..127 range are
+        # converted to 0..255 range in the array, thus, +128 to the A and B channels.
+        base_arr = np.array(base_img)
+
+        result = apply_histogram_match(base_img, ref_img)
+        result_arr = np.array(result)
+
+        self.assertEqual(result.mode, "LAB")
+        
+
+        # 2. The A and B channels must remain mathematically identical to the base image
+        np.testing.assert_array_equal(result_arr[..., 1], base_arr[..., 1])
+        np.testing.assert_array_equal(result_arr[..., 2], base_arr[..., 2])
+        
+        # 3. The Luminance channel must be pulled toward the bright reference
+        self.assertTrue(np.all(result_arr[..., 0] > 150))
+
+        #4. The A and B channels are +128 in the array representation
+        self.assertTrue(np.all(result_arr[..., 1] == base_img.getpixel((0, 0))[1] + 128))
+        self.assertTrue(np.all(result_arr[..., 2] == base_img.getpixel((0, 0))[2] + 128))
 
 class HistogramMatchToolTests(unittest.TestCase):
     """Unit tests for the HistogramMatchTool UI wrapper."""

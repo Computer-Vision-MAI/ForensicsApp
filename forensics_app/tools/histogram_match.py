@@ -19,17 +19,44 @@ OPEN_TYPES = [
 ]
 
 
+import warnings
+import numpy as np
+from PIL import Image
+from skimage import exposure, color, img_as_float, img_as_ubyte
+from .image_utils import extract_target_channel
+
 def apply_histogram_match(base_image: Image.Image, ref_image: Image.Image) -> Image.Image:
-    """Matches the histogram of the base image to the reference image, protecting colors and alpha."""
+    """Matches the histogram of the base image to the reference image, natively handling HSV/YCbCr."""
     mode = base_image.mode
+    
+    # 1. Native Branch: Process HSV and YCbCr directly without LAB conversion
+    if mode in ("LAB", "HSV", "YCbCr"):
+        float_base = img_as_float(np.array(base_image))
+        
+        # Luminance (L) is index 0 in LAB. Value (V) is index 2 in HSV. Luma (Y) is index 0 in YCbCr.
+        target_idx = 0 if (mode == "LAB" or mode == "YCbCr") else 2
+        target_base = float_base[..., target_idx]
+        
+        # We only need the intensity distribution from the reference image, 
+        # so we extract it as a 2D grayscale array regardless of its original mode.
+        target_ref, _, _ = extract_target_channel(ref_image, as_grayscale=True)
+        
+        # Apply the matching algorithm
+        float_base[..., target_idx] = exposure.match_histograms(target_base, target_ref)
+        
+        # Output natively back to the original format
+        final_8bit = img_as_ubyte(float_base)
+        return Image.fromarray(final_8bit, mode=mode)
+
+    # 2. Standard Branch: RGB, Grayscale, CMYK, and High-Depth modes
     is_high_depth = mode in ("I", "F") or mode.startswith("I;16")
     is_grayscale = mode in ("L", "LA", "1") or is_high_depth
     
-    # 1. Extract channels for both images using the shared utility
+    # Extract channels for both images using the shared utility
     target_base, lab_base, alpha_base = extract_target_channel(base_image, as_grayscale=is_grayscale)
     target_ref, _, _ = extract_target_channel(ref_image, as_grayscale=is_grayscale)
 
-    # 2. Apply the matching algorithm
+    # Apply the matching algorithm
     matched = exposure.match_histograms(target_base, target_ref)
 
     # 3. Reconstruct the image and pack into 8-bits
@@ -50,8 +77,8 @@ def apply_histogram_match(base_image: Image.Image, ref_image: Image.Image) -> Im
     else:
         final_array = final_8bit
 
-    out_image = Image.fromarray(final_array, mode=output_mode)
-    return out_image
+    return Image.fromarray(final_array, mode=output_mode)
+
 
 class HistogramMatchTool(ForensicsTool):
     tool_id = "histogram_match"
