@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import simpledialog
+from tkinter import messagebox, simpledialog
 import numpy as np
 from PIL import Image
 import warnings
@@ -12,112 +12,74 @@ from .dialogs import ask_choice
 from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
 
-
-
 import warnings
 import numpy as np
 from PIL import Image
-from skimage import exposure, color, img_as_float, img_as_ubyte
+from skimage import exposure, color, img_as_ubyte
+from .image_utils import extract_target_channel
 
 def apply_contrast_enhancement(img: Image.Image, method: str, clip_percent: int) -> Image.Image:
-    """Enhances contrast by protecting colors in LAB and preserving range in high-depth modes."""
+    """Enhances contrast by protecting colors in LAB, preserving range in high-depth, and natively stretching HSV/YCbCr."""
     mode = img.mode
     
-    # 1. Detect image categories
+    # --- Helper to avoid duplicating the math logic ---
+    def _apply_math(channel: np.ndarray) -> np.ndarray:
+        if method == "percentile":
+            p_low, p_high = np.percentile(channel, (clip_percent, 100 - clip_percent))
+            return exposure.rescale_intensity(
+                channel, 
+                in_range=(p_low, p_high), 
+                out_range=(0, 1)
+            )
+        elif method == "equalize":
+            return exposure.equalize_hist(channel)
+        elif method == "adaptive":
+            return exposure.equalize_adapthist(channel, clip_limit=0.03)
+        else:
+            raise ValueError(f"Unsupported contrast enhancement method: '{method}'")
+
+    # 1. Native Branch: Process HSV and YCbCr directly without LAB conversion
+    if mode in ("LAB", "HSV", "YCbCr"):
+        float_img = img_as_float(np.array(img))
+        
+        # Luminance (L) is index 0 in LAB. Value (V) is index 2 in HSV. Luma (Y) is index 0 in YCbCr.
+        target_idx = 0 if mode == "LAB" or mode == "YCbCr" else 2
+        
+        # Extract, stretch, and directly replace the intensity channel
+        float_img[..., target_idx] = _apply_math(float_img[..., target_idx])
+        
+        # Output natively back to the original format
+        final_8bit = img_as_ubyte(float_img)
+        return Image.fromarray(final_8bit, mode=mode)
+
+    # 2. Standard Branch: RGB, Grayscale, CMYK, and High-Depth modes
     is_high_depth = mode in ("I", "F") or mode.startswith("I;16")
     is_grayscale = mode in ("L", "LA", "1") or is_high_depth
     
-    # 2. Extract alpha channel and normalize working array to float [0, 1]
-    has_alpha = False
-    alpha_channel = None
-    float_img = None
-    
-    if mode in ("RGBA", "LA", "PA") or "transparency" in img.info:
-        has_alpha = True
-        if is_grayscale:
-            img = img.convert("LA")
-            img_array = np.array(img)
-            alpha_channel = img_array[..., 1]
-            float_img = img_as_float(img_array[..., 0])
-        else:
-            img = img.convert("RGBA")
-            img_array = np.array(img)
-            alpha_channel = img_array[..., 3]
-            float_img = img_as_float(img_array[..., :3])
-    else:
-        if is_high_depth:
-            # Load raw data without Pillow clipping to 255
-            raw_array = np.asarray(img, dtype=np.float64)
-            
-            # 1. Identify valid pixels so corrupted data doesn't skew the true min/max
-            valid_mask = np.isfinite(raw_array)
-            
-            if np.any(valid_mask):
-                c_min = np.min(raw_array[valid_mask])
-                c_max = np.max(raw_array[valid_mask])
-                
-                # 2. Neutralize non-finite values safely using the true boundaries
-                # NaNs and -Infs become the minimum (renders as black), +Infs become the maximum (white)
-                raw_array = np.nan_to_num(raw_array, nan=c_min, posinf=c_max, neginf=c_min)
-                
-                # 3. Normalize manually to [0, 1]
-                if c_max > c_min:
-                    float_img = (raw_array - c_min) / (c_max - c_min)
-                else:
-                    float_img = np.zeros_like(raw_array)
-            else:
-                # If the image is entirely corrupted (all NaNs/Infs), output a black safe image
-                float_img = np.zeros_like(raw_array)
-        elif is_grayscale:
-            img = img.convert("L")
-            float_img = img_as_float(np.array(img))
-        else:
-            img = img.convert("RGB")
-            float_img = img_as_float(np.array(img))
+    target_channel, lab_image, alpha_channel = extract_target_channel(img, as_grayscale=is_grayscale)
 
-    # 3. Prepare target channel for scikit-image
-    if is_grayscale:
-        target_channel = float_img
-    else:
-        lab_image = color.rgb2lab(float_img)
-        target_channel = lab_image[..., 0] / 100.0
+    # Apply the exact same math to the extracted channel
+    enhanced = _apply_math(target_channel)
 
-    # 4. Apply the selected mathematical algorithm
-    if method == "percentile":
-        p_low, p_high = np.percentile(target_channel, (clip_percent, 100 - clip_percent))
-        enhanced = exposure.rescale_intensity(
-            target_channel, 
-            in_range=(p_low, p_high), 
-            out_range=(0, 1)
-        )
-    elif method == "equalize":
-        enhanced = exposure.equalize_hist(target_channel)
-    elif method == "adaptive":
-        enhanced = exposure.equalize_adapthist(target_channel, clip_limit=0.03)
-    else:
-        raise ValueError(f"Unsupported contrast enhancement method: '{method}'")
-
-    # 5. Reconstruct the image and pack into 8-bits
+    # 3. Reconstruct the image and pack into 8-bits
     if is_grayscale:
         final_8bit = img_as_ubyte(enhanced)
-        output_mode = "LA" if has_alpha else "L"
+        output_mode = "LA" if alpha_channel is not None else "L"
     else:
         lab_image[..., 0] = enhanced * 100.0
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             enhanced_rgb = color.lab2rgb(lab_image)
         final_8bit = img_as_ubyte(enhanced_rgb)
-        output_mode = "RGBA" if has_alpha else "RGB"
+        output_mode = "RGBA" if alpha_channel is not None else "RGB"
 
-    # 6. Reassemble the Alpha channel if it existed
-    if has_alpha:
+    # 4. Reassemble the Alpha channel if it existed
+    if alpha_channel is not None:
         final_array = np.dstack((final_8bit, alpha_channel))
     else:
         final_array = final_8bit
 
-    out_image = Image.fromarray(final_array, mode=output_mode)
-
-    return out_image
+    return Image.fromarray(final_array, mode=output_mode)
 
 class ContrastStretchTool(ForensicsTool):
     tool_id = "contrast_stretch"
@@ -159,8 +121,12 @@ class ContrastStretchTool(ForensicsTool):
                 return None  # User canceled the percentage input dialog
         
         # 3. Apply the mathematical transformation
-        out_image = apply_contrast_enhancement(document.current, method, percent)
-        
+        try:
+            out_image = apply_contrast_enhancement(document.current, method, percent)
+        except ValueError as error:
+            messagebox.showerror("Processing Error", str(error), parent=parent)
+            return None
+
         return ToolResult(
             image=out_image,
             message=f"Contrast enhanced successfully using {method}.",

@@ -8,6 +8,7 @@ from .registry import ToolRegistry
 from .mask import MaskTool
 from .histogram import HistogramTool
 from .contrast_stretch import ContrastStretchTool
+from .histogram_match import HistogramMatchTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -19,7 +20,8 @@ def build_tool_registry() -> ToolRegistry:
             ChannelSwapTool(),
             MaskTool(),
             HistogramTool(),
-            ContrastStretchTool()
+            ContrastStretchTool(),
+            HistogramMatchTool(),
         ]
     )
 
