@@ -75,6 +75,16 @@ class RescaleTests(unittest.TestCase):
         self.assertEqual(result.size, (2, 2))
         self.assertTrue(np.all(np.asarray(result) == 0))
 
+    def test_non_finite_pixels_do_not_spoil_the_finite_ones(self) -> None:
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            image = Image.fromarray(np.array([[0.0, 0.5, 1.0, bad]], dtype=np.float32))
+            with self.subTest(bad=bad):
+                self.assertEqual(np.asarray(rescale_to_8bit(image)).tolist(), [[0, 128, 255, 0]])
+
+    def test_image_without_finite_pixels_becomes_black(self) -> None:
+        image = Image.fromarray(np.full((2, 2), np.nan, dtype=np.float32))
+        self.assertTrue(np.all(np.asarray(rescale_to_8bit(image)) == 0))
+
 
 class HasTransparencyTests(unittest.TestCase):
     def test_detects_alpha_channels_and_palette_transparency(self) -> None:

@@ -18,13 +18,18 @@ TARGET_MODES = ("RGB", "RGBA", "L", "LA", "CMYK", "YCbCr", "LAB", "HSV")
 def rescale_to_8bit(image: Image.Image) -> Image.Image:
     """Return a numeric image (I, F, I;16...) as 8-bit grayscale, stretched to 0-255.
 
-    A flat image becomes all zeros.
+    The range is taken from the finite values only; NaN and infinite pixels, and
+    every pixel of a flat image, become zero.
     """
     values = np.asarray(image).astype(float)
-    low, high = values.min(), values.max()
+    finite = np.isfinite(values)
+    if not finite.any():
+        return Image.new("L", image.size, 0)
+    low, high = values[finite].min(), values[finite].max()
     if low == high:
         return Image.new("L", image.size, 0)
-    scaled = (values - low) / (high - low) * 255
+    scaled = np.zeros(values.shape)
+    scaled[finite] = (values[finite] - low) / (high - low) * 255
     return Image.fromarray(scaled.round().astype(np.uint8))
 
 
@@ -72,7 +77,7 @@ class ConvertModeTool(ForensicsTool):
         targets = tuple(mode for mode in TARGET_MODES if mode != source.mode)
         labels = tuple(f"{mode} ({', '.join(MODE_CHANNELS[mode])})" for mode in targets)
 
-        index = ask_choice(parent, "Convert mode", f"Convert {source.mode} to:", labels)
+        index = ask_choice(parent, self.title, f"Convert {source.mode} to:", labels)
         if index is None:
             return None
         target = targets[index]
@@ -80,7 +85,7 @@ class ConvertModeTool(ForensicsTool):
         output = convert_mode(source, target)
 
         details = {
-            "Operation": "Convert mode",
+            "Operation": self.title,
             "From": source.mode,
             "To": target,
             "Alpha": _alpha_note(source, output),
