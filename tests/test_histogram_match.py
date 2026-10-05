@@ -119,6 +119,70 @@ class HistogramMatchFunctionTests(unittest.TestCase):
         self.assertTrue(np.all(result_arr[..., 1] == base_img.getpixel((0, 0))[1] + 128))
         self.assertTrue(np.all(result_arr[..., 2] == base_img.getpixel((0, 0))[2] + 128))
 
+    def test_match_la_preserves_alpha(self) -> None:
+        # Base is grayscale with alpha. Ref is standard grayscale.
+        base_img = Image.new("LA", (2, 2), color=(50, 128))
+        base_img.putpixel((0, 0), (100, 0))
+        ref_img = Image.new("L", (2, 2), color=200)
+
+        input_alpha = np.array(base_img.getchannel("A"))
+        result = apply_histogram_match(base_img, ref_img)
+        result_arr = np.array(result)
+
+        self.assertEqual(result.mode, "LA")
+        # Check that the alpha channel is perfectly intact
+        np.testing.assert_array_equal(result_arr[..., 1], input_alpha)
+        # Check that the luminance channel was matched to the bright reference
+        self.assertTrue(np.all(result_arr[..., 0] > 150))
+
+    def test_match_palette_with_transparency(self) -> None:
+        # Palette image with transparency must be processed and output as RGBA
+        base_img = Image.new("P", (2, 2))
+        base_img.putpalette([50, 50, 50, 100, 100, 100] + [0] * 762)
+        base_img.putdata([0, 1, 0, 1])
+        base_img.info["transparency"] = 0  # Index 0 is transparent
+        
+        ref_img = Image.new("RGB", (2, 2), color=(200, 200, 200))
+        
+        input_alpha = np.array(base_img.convert("RGBA").getchannel("A"))
+        result = apply_histogram_match(base_img, ref_img)
+        result_arr = np.array(result)
+        
+        self.assertEqual(result.mode, "RGBA")
+        # Alpha channel must survive the LAB conversion trip
+        np.testing.assert_array_equal(result_arr[..., 3], input_alpha)
+        # RGB channels must be matched to the bright reference
+        self.assertTrue(np.all(result_arr[..., :3] > 150))
+
+    def test_match_high_depth_base_produces_l(self) -> None:
+        # 32-bit Float image (e.g. scientific or medical evidence)
+        f_data = np.array([[0.1, 0.2], [0.3, 0.4]], dtype=np.float32)
+        base_img = Image.fromarray(f_data, mode="F")
+        
+        # Match against a bright 8-bit reference
+        ref_img = Image.new("L", (2, 2), color=200)
+        
+        result = apply_histogram_match(base_img, ref_img)
+        result_arr = np.array(result)
+        
+        # The result must be squeezed safely into an 8-bit L image
+        self.assertEqual(result.mode, "L")
+        self.assertEqual(result_arr.dtype, np.uint8)
+        self.assertTrue(np.all(result_arr > 150))
+
+    def test_match_cross_mode_l_base_to_rgb_reference(self) -> None:
+        # Base is grayscale, reference is color
+        base_img = Image.new("L", (2, 2), color=50)
+        ref_img = Image.new("RGB", (2, 2), color=(200, 200, 200))
+        
+        result = apply_histogram_match(base_img, ref_img)
+        result_arr = np.array(result)
+        
+        # The output must strictly respect the base image's mode
+        self.assertEqual(result.mode, "L")
+        self.assertEqual(result.size, (2, 2))
+        self.assertTrue(np.all(result_arr > 150))
+
 class HistogramMatchToolTests(unittest.TestCase):
     """Unit tests for the HistogramMatchTool UI wrapper."""
 

@@ -1,6 +1,7 @@
 import unittest
 import numpy as np
 from PIL import Image
+from unittest.mock import patch, MagicMock
 
 from forensics_app.tools.image_utils import extract_target_channel
 
@@ -98,6 +99,54 @@ class ImageUtilsTests(unittest.TestCase):
         self.assertEqual(lab.shape, (1, 2, 3))
         # The target should remain a 2D luminance array
         self.assertEqual(target.shape, (1, 2))
+    
+    def test_rgb_returns_no_alpha(self) -> None:
+        img = Image.new("RGB", (2, 2), color=(100, 150, 200))
+        target, lab, alpha = extract_target_channel(img, as_grayscale=False)
+        
+        self.assertIsNone(alpha)
+        self.assertIsNotNone(lab)
+        # RGB is converted to LAB, so lab array should be 3D and target 2D
+        self.assertEqual(lab.shape, (2, 2, 3))
+        self.assertEqual(target.shape, (2, 2))
+
+    def test_l_returns_no_alpha(self) -> None:
+        img = Image.new("L", (2, 2), color=128)
+        target, lab, alpha = extract_target_channel(img, as_grayscale=True)
+        
+        self.assertIsNone(alpha)
+        self.assertIsNone(lab)  # Grayscale workflows skip LAB conversion
+        self.assertEqual(target.shape, (2, 2))
+
+    def test_1_returns_no_alpha(self) -> None:
+        # Binary (1-bit) images should be treated as opaque grayscale
+        img = Image.new("1", (2, 2), color=1)
+        target, lab, alpha = extract_target_channel(img, as_grayscale=True)
+        
+        self.assertIsNone(alpha)
+        self.assertIsNone(lab)
+        # Target must be successfully normalized to [0, 1] float
+        self.assertTrue(np.all(target == 1.0))
+
+    def test_palette_without_transparency_returns_no_alpha(self) -> None:
+        # A standard palette image without a transparency key in its info dictionary
+        img = Image.new("P", (2, 2))
+        img.putpalette([50, 50, 50, 150, 150, 150] + [0] * 762)
+        img.putdata([0, 1, 0, 1])
+        
+        target, lab, alpha = extract_target_channel(img, as_grayscale=False)
+        
+        self.assertIsNone(alpha)
+        self.assertIsNotNone(lab)
+
+    def test_unsupported_mode_raises_value_error(self) -> None:
+        # "XYZ" is a valid Pillow color space, but it is explicitly NOT in our 
+        # forensic supported_modes allowlist, so it must be rejected to prevent corruption.
+        img = MagicMock(spec=Image.Image)
+        img.mode = "XYZ"
+        
+        with self.assertRaisesRegex(ValueError, "Unsupported image mode: 'XYZ'"):
+            extract_target_channel(img, as_grayscale=False)
 
 if __name__ == "__main__":
     unittest.main()

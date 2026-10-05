@@ -19,8 +19,7 @@ def extract_target_channel(
     
     # 1. Enforce strict allowlist covering all recognized Pillow modes
     supported_modes = {
-        "1", "L", "I", "F", "P", "PA", "RGB", "CMYK", 
-        "LAB", "RGBA", "RGBX", "RGBa", "LA", "La"
+        "1", "L", "I", "F", "P", "PA", "RGB", "CMYK", "RGBA", "RGBX", "RGBa", "LA", "La"
     }
     if mode not in supported_modes and not mode.startswith("I;16"):
         raise ValueError(f"Unsupported image mode: '{mode}'. Cannot safely extract channels.")

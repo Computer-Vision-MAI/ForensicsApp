@@ -96,8 +96,12 @@ class HistogramMatchTool(ForensicsTool):
         
         ref_path, ref_img = ref_data
 
-        # 2. Apply the mathematical logic
-        output = apply_histogram_match(document.current, ref_img)
+        # 2. Apply the mathematical logic and catch processing errors safely
+        try:
+            output = apply_histogram_match(document.current, ref_img)
+        except ValueError as error:
+            messagebox.showerror("Processing Error", str(error), parent=parent)
+            return None
   
         # 3. Return the result
         return ToolResult(

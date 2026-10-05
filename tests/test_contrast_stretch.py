@@ -123,12 +123,43 @@ class ContrastStretchFunctionTests(unittest.TestCase):
         
         result = apply_contrast_enhancement(img, method="percentile", clip_percent=0)
         
-        # Because we reconstruct LAB via standard color.lab2rgb, it outputs RGB
         self.assertEqual(result.mode, "LAB")
         # Luminance channel should be stretched to full range (50->0, 200->255)
         result_arr = np.array(result)
         self.assertEqual(result_arr[0, 0, 0], 0)
         self.assertEqual(result_arr[1, 1, 0], 255)
+
+    def test_rgba_preserves_alpha_on_reassembly(self) -> None:
+        # Verifies that apply_contrast_enhancement correctly re-stacks the alpha channel 
+        # and outputs the "RGBA" mode using np.dstack
+        img = Image.new("RGBA", (2, 2), color=(100, 100, 100, 128))
+        img.putpixel((0, 0), (150, 150, 150, 0))
+        
+        input_alpha = np.array(img.getchannel("A"))
+        result = apply_contrast_enhancement(img, method="percentile", clip_percent=0)
+        result_arr = np.array(result)
+        
+        self.assertEqual(result.mode, "RGBA")
+        # Check that the 4th channel (index 3) is perfectly intact
+        np.testing.assert_array_equal(result_arr[..., 3], input_alpha)
+        # Check that the RGB channels were still stretched (100 -> 0)
+        self.assertEqual(result_arr[1, 1, 0], 0)
+
+    def test_la_preserves_alpha_on_reassembly(self) -> None:
+        # Verifies that apply_contrast_enhancement correctly handles 2D grayscale + alpha
+        # and outputs the "LA" mode using np.dstack
+        img = Image.new("LA", (2, 2), color=(125, 128))
+        img.putpixel((0, 0), (50, 0))
+        
+        input_alpha = np.array(img.getchannel("A"))
+        result = apply_contrast_enhancement(img, method="percentile", clip_percent=0)
+        result_arr = np.array(result)
+        
+        self.assertEqual(result.mode, "LA")
+        # Check that the 2nd channel (index 1) is perfectly intact
+        np.testing.assert_array_equal(result_arr[..., 1], input_alpha)
+        # Check that the L channel was still stretched (50 -> 0)
+        self.assertEqual(result_arr[0, 0, 0], 0)
 
 class ContrastStretchToolTests(unittest.TestCase):
     """Unit tests for the ContrastStretchTool wrapper and UI integration."""
