@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import messsagebox, simpledialog
+from tkinter import messagebox, simpledialog
 import numpy as np
 from PIL import Image
 import warnings
