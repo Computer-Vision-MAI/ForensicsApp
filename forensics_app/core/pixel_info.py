@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from PIL import Image
 
-
-_NUMERIC_MODES = frozenset({"I", "F", "I;16", "I;16L", "I;16B", "I;16N"})
+from forensics_app.core.channels import NUMERIC_MODES
 
 
 def pixel_color(image: Image.Image, column: int, row: int) -> tuple[int, int, int] | None:
     """Return the on-screen RGB color of a pixel, or None for numeric modes."""
-    if image.mode in _NUMERIC_MODES:
+    if image.mode in NUMERIC_MODES:
         return None
     pixel = image.crop((column, row, column + 1, row + 1))
     if pixel.mode == "La":

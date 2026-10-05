@@ -1,8 +1,9 @@
 import unittest
 
+import numpy as np
 from PIL import Image
 
-from forensics_app.core.channels import MODE_CHANNELS, to_multichannel
+from forensics_app.core.channels import MODE_CHANNELS, NUMERIC_MODES, to_multichannel
 
 
 class ModeChannelsTests(unittest.TestCase):
@@ -13,6 +14,12 @@ class ModeChannelsTests(unittest.TestCase):
         for mode, names in MODE_CHANNELS.items():
             with self.subTest(mode=mode):
                 self.assertEqual(len(names), len(Image.new(mode, (1, 1)).getbands()))
+
+    def test_numeric_modes_are_the_ones_wider_than_8_bits(self) -> None:
+        for mode in Image.MODES:
+            itemsize = np.asarray(Image.new(mode, (1, 1))).dtype.itemsize
+            with self.subTest(mode=mode):
+                self.assertEqual(mode in NUMERIC_MODES, itemsize > 1)
 
 
 class ToMultichannelTests(unittest.TestCase):
