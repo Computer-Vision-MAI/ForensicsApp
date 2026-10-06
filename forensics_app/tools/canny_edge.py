@@ -7,6 +7,31 @@ from skimage import feature
 from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
 
+def apply_canny_edge(
+    img: Image.Image,
+    sigma: float,
+    low_threshold: float,
+    high_threshold: float,
+    superimpose: bool = False,
+    alpha: float = 0.6,
+) -> Image.Image:
+    """Detect edges and return a binary mask or an overlay on the source colors."""
+    gray_arr = np.array(img.convert("L"))
+    edges = feature.canny(
+        gray_arr,
+        sigma=sigma,
+        low_threshold=low_threshold,
+        high_threshold=high_threshold,
+    )
+    if superimpose:
+        rgb_arr = np.array(img.convert("RGB"), dtype=np.float32)
+        edge_color = np.array([255, 0, 0], dtype=np.float32)
+        rgb_arr[edges] = rgb_arr[edges] * (1.0 - alpha) + edge_color * alpha
+        return Image.fromarray(np.clip(rgb_arr, 0, 255).astype(np.uint8))
+
+    return Image.fromarray((edges * 255).astype(np.uint8))
+
+
 class CannyEdgeTool(ForensicsTool):
     tool_id = "canny_edge"
     title = "Canny Edge Detector"
@@ -17,12 +42,6 @@ class CannyEdgeTool(ForensicsTool):
     def run(self, parent: tk.Misc, document: ImageDocument) -> 'ToolResult | None':
         assert document.current is not None
 
-        # 1. Convert to grayscale mimicking the base tool
-        # (Using 'L' mode ensures an 8-bit [0, 255] baseline for standard Canny operations)
-        gray_img = document.current.convert("L")
-        gray_arr = np.array(gray_img)
-
-        # 2. Solicit Canny parameters consecutively
         sigma = simpledialog.askfloat(
             "Canny Edge Detector",
             "Enter Sigma (Gaussian filter standard deviation):",
@@ -64,49 +83,31 @@ class CannyEdgeTool(ForensicsTool):
             parent=parent
         )
 
-        # 4. Apply the Canny Edge Detector safely
+        alpha = 0.6
+        if superimpose:
+            alpha = simpledialog.askfloat(
+                "Superimpose Weight",
+                "Enter Blending Weight (0-1):",
+                initialvalue=0.6,
+                minvalue=0.0,
+                maxvalue=1.0,
+                parent=parent
+            )
+            if alpha is None:
+                return None
+
         try:
-            edges = feature.canny(
-                gray_arr, 
-                sigma=sigma, 
-                low_threshold=low_thresh, 
-                high_threshold=high_thresh
+            out_img = apply_canny_edge(
+                document.current, sigma, low_thresh, high_thresh, superimpose, alpha
             )
         except ValueError as error:
             messagebox.showerror("Processing Error", str(error), parent=parent)
             return None
 
-        # 5. Format the output based on user choice
-        if superimpose:
-            # Convert grayscale base to a 3-channel RGB array
-            rgb_arr = np.stack((gray_arr,) * 3, axis=-1).astype(np.float32)
-            
-            # Define edge color (Pure Red) and blending weight (alpha)
-            edge_color = np.array([255, 0, 0], dtype=np.float32)
-
-            alpha = 0.6  # 60% edge color, 40% original image intensity
-            alpha = simpledialog.askfloat(
-                        "Superimpose Weight",
-                        "Enter Blending Weight (0-1):",
-                        initialvalue=0.6,
-                        minvalue=0.0,
-                        maxvalue=1.0,
-                        parent=parent
-                    )
-            if alpha is None:
-                return None
-
-            # Perform the ponderated sum 
-            rgb_arr[edges] = (rgb_arr[edges] * (1.0 - alpha)) + (edge_color * alpha)
-            rgb_arr[~edges] = (rgb_arr[~edges] * (1.0 - alpha))
-            
-            out_img = Image.fromarray(np.clip(rgb_arr, 0, 255).astype(np.uint8), mode="RGB")
-            msg = "Canny edges superimposed successfully."
-        else:
-            # Create a strict binary mask [0, 255]
-            mask_arr = (edges * 255).astype(np.uint8)
-            out_img = Image.fromarray(mask_arr, mode="L")
-            msg = "Canny edge mask generated successfully."
+        msg = (
+            "Canny edges superimposed successfully."
+            if superimpose else "Canny edge mask generated successfully."
+        )
 
         # 6. Return the ToolResult
         return ToolResult(

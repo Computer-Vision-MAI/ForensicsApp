@@ -80,10 +80,22 @@ class ImageUtilsTests(unittest.TestCase):
         
         target, lab, alpha = extract_target_channel(img, as_grayscale=True)
         
-        # Min valid is 100.0 (becomes 0.0), Max valid is np.float.max (becomes 1.0)
-        # NaN is safely replaced by the minimum. Inf is safely replaced by the maximum.
-        # The other values are normalized between these two extremes.
-        np.testing.assert_almost_equal(target, [[0.0, 0.5], [0.5, 1.0]])
+        # Finite values define the range; NaN/Inf map to its endpoints.
+        np.testing.assert_array_equal(target, [[0.0, 0.0], [1.0, 1.0]])
+        self.assertLess(target[0, 1], target[1, 0])
+
+    def test_float_range_and_degenerate_ranges(self) -> None:
+        cases = (
+            ([100.0, 150.0, 200.0], [0.0, 0.5, 1.0]),
+            ([100.0, 100.0, 100.0], [0.0, 0.0, 0.0]),
+            ([np.nan, np.inf, -np.inf], [0.0, 0.0, 0.0]),
+            ([-np.inf, 100.0, np.nan], [0.0, 0.0, 0.0]),
+        )
+        for values, expected in cases:
+            with self.subTest(values=values):
+                img = Image.fromarray(np.array([values], dtype=np.float32))
+                target, _, _ = extract_target_channel(img, as_grayscale=True)
+                np.testing.assert_array_equal(target, [expected])
 
     def test_high_depth_image_as_color_translates_to_lab(self) -> None:
         # Tests the failsafe where a 1-channel high depth image is used as a reference 

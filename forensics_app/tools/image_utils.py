@@ -32,7 +32,7 @@ def extract_target_channel(
     
     alpha_channel = None
     
-    # 3. Get raw normalized float data [0, 1] without stretching or clipping
+    # 3. Normalize to [0, 1], using the finite pixel range for F mode
     if is_high_depth:
 
         orig_array = np.asarray(img)
@@ -43,22 +43,22 @@ def extract_target_channel(
         valid_mask = np.isfinite(raw_array)
 
         if np.any(valid_mask):
-                # Extract the limits based on the original type, not float64
-                if orig_dtype.kind in ('i', 'u'):  # If it is a signed or unsigned integer
-                    limits = np.iinfo(orig_dtype)
-                else:  # If it is float type F
-                    limits = np.finfo(orig_dtype)
-                    
-                c_min = float(limits.min)
-                c_max = float(limits.max)
-                
-                raw_array = np.nan_to_num(raw_array, nan=c_min, posinf=c_max, neginf=c_min)
-                
-                if c_max > c_min:
-                    float_img = (raw_array - c_min) / (c_max - c_min)
+            if orig_dtype.kind in ('i', 'u'):
+                limits = np.iinfo(orig_dtype)
+                c_min, c_max = float(limits.min), float(limits.max)
+            else:
+                # F mode has no fixed intensity range; use its finite pixels.
+                finite_pixels = raw_array[valid_mask]
+                c_min, c_max = finite_pixels.min(), finite_pixels.max()
+
+            raw_array = np.nan_to_num(raw_array, nan=c_min, posinf=c_max, neginf=c_min)
+            if c_max > c_min:
+                float_img = (raw_array - c_min) / (c_max - c_min)
+            else:
+                float_img = np.zeros_like(raw_array)
         else:
             float_img = np.zeros_like(raw_array)
-            
+
         if not as_grayscale:
             float_img = color.gray2rgb(float_img)
             

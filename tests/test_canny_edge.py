@@ -5,6 +5,7 @@ from PIL import Image
 
 from forensics_app.core import ImageDocument
 from forensics_app.tools import CannyEdgeTool
+from forensics_app.tools.canny_edge import apply_canny_edge
 
 
 class CannyEdgeToolTests(unittest.TestCase):
@@ -34,35 +35,33 @@ class CannyEdgeToolTests(unittest.TestCase):
     @patch("tkinter.messagebox.askyesno")
     @patch("tkinter.simpledialog.askfloat")
     def test_canny_edge_binary_mask(self, mock_askfloat, mock_askyesno) -> None:
-        # Simulate user input for sigma, low_thresh, high_thresh
-        mock_askfloat.side_effect = [1.0, 10.0, 50.0]
-        # Simulate that the user chooses not to superimpose edges (False)
+        source = self.document.current
         mock_askyesno.return_value = False
-        
-        result = self.tool.run(self.parent, self.document)
-        
-        self.assertIsNotNone(result)
-        self.assertEqual(result.image.mode, "L")
-        
-        # Check that the output is a binary mask (only 0 and 255 values)
-        arr = np.array(result.image)
-        unique_vals = np.unique(arr)
-        for val in unique_vals:
-            self.assertIn(val, [0, 255])
+        for mode in ("RGB", "L", "RGBA", "P"):
+            with self.subTest(mode=mode):
+                self.document.current = source.convert(mode)
+                mock_askfloat.side_effect = [1.0, 10.0, 50.0]
+                result = self.tool.run(self.parent, self.document)
+
+                self.assertIsNotNone(result)
+                self.assertEqual(result.image.mode, "L")
+                self.assertEqual(result.image.size, source.size)
+                self.assertEqual(set(np.unique(result.image)), {0, 255})
 
     @patch("tkinter.messagebox.askyesno")
     @patch("tkinter.simpledialog.askfloat")
     def test_canny_edge_superimposed(self, mock_askfloat, mock_askyesno) -> None:
-        # sigma, low_thresh, high_thresh, alpha
-        mock_askfloat.side_effect = [1.0, 10.0, 50.0, 0.5]
-        # Simulate that the user chooses to superimpose edges (True)
+        source = self.document.current
         mock_askyesno.return_value = True
-        
-        result = self.tool.run(self.parent, self.document)
-        
-        self.assertIsNotNone(result)
-        self.assertEqual(result.image.mode, "RGB")
-        self.assertEqual(result.image.size, (10, 10))
+        for mode in ("RGB", "L", "RGBA", "P"):
+            with self.subTest(mode=mode):
+                self.document.current = source.convert(mode)
+                mock_askfloat.side_effect = [1.0, 10.0, 50.0, 0.5]
+                result = self.tool.run(self.parent, self.document)
+
+                self.assertIsNotNone(result)
+                self.assertEqual(result.image.mode, "RGB")
+                self.assertEqual(result.image.size, source.size)
 
     @patch("tkinter.messagebox.askyesno")
     @patch("tkinter.simpledialog.askfloat")
@@ -85,72 +84,63 @@ class CannyEdgeToolTests(unittest.TestCase):
     @patch("tkinter.messagebox.askyesno")
     @patch("tkinter.simpledialog.askfloat")
     def test_superimposed_ponderated_colors(self, mock_askfloat, mock_askyesno) -> None:
-        # sigma, low_thresh, high_thresh, alpha
+        # Use source colors with different channel values to catch desaturation.
+        source = Image.new("RGB", (10, 10), (10, 30, 50))
+        source.paste((200, 180, 160), (3, 3, 7, 7))
+        self.document.current = source
         mock_askfloat.side_effect = [0.0, 10.0, 50.0, 0.5]
         mock_askyesno.return_value = True
-        
+
         result = self.tool.run(self.parent, self.document)
         arr = np.array(result.image)
-        
-        # 1. Verify that the image is in RGB mode
         self.assertEqual(result.image.mode, "RGB")
-        
-        # 2. Check a pixel in the center of the white square (5,5) which is not an edge.
-        # The original pixel value is (255, 255, 255), and since it's
-        # not an edge, it should be weighted with alpha=0.5 getting 127.5 value.
-        
-        center_pixel = arr[5, 5]
-        self.assertTrue(126 <= center_pixel[0] <= 128)
-        self.assertEqual(center_pixel[0], center_pixel[1])
-        self.assertEqual(center_pixel[1], center_pixel[2])
-        
-        # 3. Check a pixel in the background that is not an edge (original=0).
-        # Formula: 0 * (1 - 0.5) = 0.
-        corner_pixel = arr[0, 0]
-        print(f"Corner pixel value: {corner_pixel}")
-        self.assertTrue(np.array_equal(corner_pixel, [0, 0, 0]))
-        
-        # 4. Check a pixel that is an edge (e.g., (3,3)). The original pixel value is (255, 255, 255), 
-        # and the edge color is (255, 0, 0).
-        edge_found = False
-        for r in range(10):
-            for c in range(10):
-                pixel = arr[r, c]
-                # Check if the pixel has a red channel greater than the green and blue channels, indicating an edge.
-                if pixel[0] > pixel[1] and pixel[0] > pixel[2]:
-                    edge_found = True
-                    # Check that the red channel is greater than the green and blue channels, indicating an edge.
-                    self.assertTrue(pixel[0] > pixel[1])
-                    self.assertTrue(pixel[0] > pixel[2])
-                    # Check that the green and blue channels are equal (since the edge color is red).
-                    self.assertEqual(pixel[1], pixel[2])
-                    break
-            if edge_found:
-                break
-                
-        self.assertTrue(edge_found, "Not found edge pixels.")
+        np.testing.assert_array_equal(arr[5, 5], [200, 180, 160])
+        np.testing.assert_array_equal(arr[0, 0], [10, 30, 50])
+        np.testing.assert_array_equal(arr[3, 3], [227, 90, 80])
 
-    @patch("tkinter.messagebox.askyesno")
+    @patch("tkinter.messagebox.askyesno", return_value=True)
     @patch("tkinter.simpledialog.askfloat")
     def test_superimposed_alpha_extremes(self, mock_askfloat, mock_askyesno) -> None:
-        
+        for alpha in (0.0, 1.0):
+            with self.subTest(alpha=alpha):
+                mock_askfloat.side_effect = [1.0, 10.0, 50.0, alpha]
+                result = self.tool.run(self.parent, self.document)
+                arr = np.array(result.image)
+                np.testing.assert_array_equal(arr[5, 5], [255, 255, 255])
+                if alpha == 0.0:
+                    np.testing.assert_array_equal(arr, np.array(self.document.current))
+                else:
+                    np.testing.assert_array_equal(arr[3, 3], [255, 0, 0])
 
-        # We check the behavior of the ponderated sum with extreme alpha values like 1.0.
-        # 
-        mock_askfloat.side_effect = [1.0, 10.0, 50.0, 1.0]
-        mock_askyesno.return_value = True
-        
-        result = self.tool.run(self.parent, self.document)
-        arr = np.array(result.image)
-        
-        # Center pixel (5,5) should be 0 as it's not an edge.
-        self.assertTrue(np.array_equal(arr[5, 5], [0, 0, 0]))
-        
-        # Edge pixels should be fully red due to alpha=1.0, meaning the original color is completely overridden.
-        edge_pixels = arr[(arr[:, :, 0] == 255)]
-        self.assertTrue(len(edge_pixels) > 0)
-        for p in edge_pixels:
-            self.assertTrue(np.array_equal(p, [255, 0, 0]))
+    @patch("tkinter.messagebox.showerror")
+    @patch("tkinter.messagebox.askyesno", return_value=False)
+    @patch("tkinter.simpledialog.askfloat", side_effect=[1.0, 50.0, 10.0])
+    def test_processing_error_is_reported(self, mock_askfloat, mock_askyesno, mock_error) -> None:
+        self.assertIsNone(self.tool.run(self.parent, self.document))
+        mock_error.assert_called_once()
+
+
+class CannyEdgeFunctionTests(unittest.TestCase):
+    def test_mask_and_overlay_without_dialogs(self) -> None:
+        source = Image.new("RGB", (10, 10), (10, 30, 50))
+        source.paste((200, 180, 160), (3, 3, 7, 7))
+        original = np.array(source)
+        mask = apply_canny_edge(source, 0.0, 10.0, 50.0)
+        self.assertEqual(mask.mode, "L")
+        self.assertEqual(mask.size, source.size)
+        self.assertEqual(set(np.unique(mask)), {0, 255})
+        edges = np.array(mask) != 0
+        self.assertTrue(edges[3, 3])
+        self.assertFalse(edges[5, 5])
+
+        overlay = apply_canny_edge(source, 0.0, 10.0, 50.0, True, 0.5)
+        self.assertEqual(overlay.mode, "RGB")
+        self.assertEqual(overlay.size, source.size)
+        actual = np.array(overlay)
+        np.testing.assert_array_equal(actual[~edges], original[~edges])
+        expected_edges = (original[edges] * 0.5 + np.array([255, 0, 0]) * 0.5).astype(np.uint8)
+        np.testing.assert_array_equal(actual[edges], expected_edges)
+        np.testing.assert_array_equal(np.array(source), original)
 
 
 if __name__ == "__main__":
