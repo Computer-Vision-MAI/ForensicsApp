@@ -3,9 +3,9 @@ import numpy as np
 from PIL import Image
 from unittest.mock import patch, MagicMock
 
-from forensics_app.tools.image_utils import extract_target_channel
+from forensics_app.tools.image_utils import extract_target_channel, normalize_high_depth_image
 
-class ImageUtilsTests(unittest.TestCase):
+class ExtractTargetChannelTest(unittest.TestCase):
     """Unit tests for the shared image channel extraction utility."""
 
     def test_rgba_preserves_alpha(self) -> None:
@@ -44,45 +44,6 @@ class ImageUtilsTests(unittest.TestCase):
                 
                 self.assertIsNotNone(alpha)
                 np.testing.assert_array_equal(alpha, input_alpha)
-
-    def test_high_depth_image_prevents_premature_clipping(self) -> None:
-        # Array with values far exceeding standard 8-bit bounds (0-255)
-        int32_data = np.array([[100, 500], [1000, 2000]], dtype=np.int32)
-        img = Image.fromarray(int32_data)
-
-        target, lab, alpha = extract_target_channel(img, as_grayscale=True)
-        
-        self.assertIsNone(alpha)
-        self.assertIsNone(lab)
-        
-        # Values should be placed more or less in the center of the [0, 1] range after normalization
-        # as the min and max of int32 are extreme, the normalized values will be very small.
-        self.assertAlmostEqual(target[0, 0], 0.5, places=2)
-        self.assertAlmostEqual(target[0, 1], 0.5, places=2)
-        self.assertAlmostEqual(target[1, 0], 0.5, places=2)
-        self.assertAlmostEqual(target[1, 1], 0.5, places=2)
-  
-
-    def test_high_depth_flat_image_becomes_zero(self) -> None:
-        # Array with identical values exceeding 8-bit bounds
-        int32_data = np.full((2, 2), 1500, dtype=np.int32)
-        img = Image.fromarray(int32_data)
-        
-        target, lab, alpha = extract_target_channel(img, as_grayscale=True)
-        
-        # Custom normalization maps flat high-depth arrays to 0 to prevent division by zero
-        self.assertAlmostEqual(target[0, 0], 0.5, places=2)
-
-    def test_high_depth_image_filters_nan_and_inf(self) -> None:
-        # Float array containing corrupted non-finite values
-        float_data = np.array([[np.nan, 100.0], [200.0, np.inf]], dtype=np.float32)
-        img = Image.fromarray(float_data)
-        
-        target, lab, alpha = extract_target_channel(img, as_grayscale=True)
-        
-        # Finite values define the range; NaN/Inf map to its endpoints.
-        np.testing.assert_array_equal(target, [[0.0, 0.0], [1.0, 1.0]])
-        self.assertLess(target[0, 1], target[1, 0])
 
     def test_float_range_and_degenerate_ranges(self) -> None:
         cases = (
@@ -159,6 +120,43 @@ class ImageUtilsTests(unittest.TestCase):
         
         with self.assertRaisesRegex(ValueError, "Unsupported image mode: 'XYZ'"):
             extract_target_channel(img, as_grayscale=False)
+
+class NormalizeHighDepthImageTest(unittest.TestCase):
+    """Unit tests for the normalize_high_depth_image function."""
+
+    def test_high_depth_image_prevents_premature_clipping(self) -> None:
+        # Array with values far exceeding standard 8-bit bounds (0-255)
+        int32_data = np.array([[100, 500], [1000, 2000]], dtype=np.int32)
+        img = Image.fromarray(int32_data)
+
+        target = normalize_high_depth_image(img)
+        
+        # The smallest value should map to 0.0, the largest to 1.0, and intermediate values proportionally
+        self.assertEqual(target[0, 0], 0.0)
+        self.assertEqual(target[0, 1], 400 / 1900)
+        self.assertEqual(target[1, 0], 900 / 1900)
+        self.assertEqual(target[1, 1], 1.0)
+    
+    def test_high_depth_flat_image_becomes_zero(self) -> None:
+        # Array with identical values exceeding 8-bit bounds
+        int32_data = np.full((2, 2), 1500, dtype=np.int32)
+        img = Image.fromarray(int32_data)
+        
+        target = normalize_high_depth_image(img)
+        
+        # Custom normalization maps flat high-depth arrays to 0 to prevent division by zero
+        self.assertEqual(target[0, 0], 0.0)
+
+    def test_high_depth_image_filters_nan_and_inf(self) -> None:
+        # Float array containing corrupted non-finite values
+        float_data = np.array([[np.nan, 100.0], [200.0, np.inf]], dtype=np.float32)
+        img = Image.fromarray(float_data)
+        
+        target = normalize_high_depth_image(img)
+        
+        # Finite values define the range; NaN/Inf map to its endpoints.
+        np.testing.assert_array_equal(target, [[0.0, 0.0], [1.0, 1.0]])
+        self.assertLess(target[0, 1], target[1, 0])
 
 if __name__ == "__main__":
     unittest.main()

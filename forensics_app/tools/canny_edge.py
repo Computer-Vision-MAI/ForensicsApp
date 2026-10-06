@@ -6,6 +6,7 @@ from skimage import feature
 
 from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
+from .image_utils import normalize_high_depth_image
 
 def apply_canny_edge(
     img: Image.Image,
@@ -16,7 +17,15 @@ def apply_canny_edge(
     alpha: float = 0.6,
 ) -> Image.Image:
     """Detect edges and return a binary mask or an overlay on the source colors."""
-    gray_arr = np.array(img.convert("L"))
+    mode = img.mode
+    is_high_depth = mode in ("I", "F") or mode.startswith("I;16")
+    if is_high_depth:
+        gray_arr = normalize_high_depth_image(img)
+        low_threshold /= 255.0
+        high_threshold /= 255.0
+    else:
+        gray_arr = np.array(img.convert("L"))
+
     edges = feature.canny(
         gray_arr,
         sigma=sigma,
@@ -118,6 +127,8 @@ class CannyEdgeTool(ForensicsTool):
                 "Sigma": sigma,
                 "Low Threshold": low_thresh,
                 "High Threshold": high_thresh,
-                "Superimposed": superimpose
+                "Superimposed": superimpose,
+                "Alpha": alpha if superimpose else "N/A"
+                
             }
         )
