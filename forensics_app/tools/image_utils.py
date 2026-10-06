@@ -21,6 +21,7 @@ def extract_target_channel(
     supported_modes = {
         "1", "L", "I", "F", "P", "PA", "RGB", "CMYK", "RGBA", "RGBX", "RGBa", "LA", "La"
     }
+
     if mode not in supported_modes and not mode.startswith("I;16"):
         raise ValueError(f"Unsupported image mode: '{mode}'. Cannot safely extract channels.")
 
@@ -31,23 +32,11 @@ def extract_target_channel(
     
     alpha_channel = None
     
-    # 3. Get raw normalized float data [0, 1]
+    # 3. Normalize to [0, 1], using the finite pixel range for F mode
     if is_high_depth:
-        raw_array = np.asarray(img, dtype=np.float64)
-        valid_mask = np.isfinite(raw_array)
-        
-        if np.any(valid_mask):
-            c_min = np.min(raw_array[valid_mask])
-            c_max = np.max(raw_array[valid_mask])
-            raw_array = np.nan_to_num(raw_array, nan=c_min, posinf=c_max, neginf=c_min)
-            
-            if c_max > c_min:
-                float_img = (raw_array - c_min) / (c_max - c_min)
-            else:
-                float_img = np.zeros_like(raw_array)
-        else:
-            float_img = np.zeros_like(raw_array)
-            
+
+        float_img = normalize_high_depth_image(img)
+
         if not as_grayscale:
             float_img = color.gray2rgb(float_img)
             
@@ -76,3 +65,28 @@ def extract_target_channel(
         lab_image = color.rgb2lab(float_img)
         target_channel = lab_image[..., 0] / 100.0
         return target_channel, lab_image, alpha_channel
+
+def normalize_high_depth_image(img: Image.Image) -> np.ndarray:
+    """
+    Normalize high-depth images (I, F, I;16) to [0, 1] range.
+    Handles NaN and infinite values by replacing them with the min/max of valid pixels.
+    """
+    orig_array = np.asarray(img)
+    
+    # Handle high-depth images by converting to float64 for calculations
+    raw_array = orig_array.astype(np.float64)
+    valid_mask = np.isfinite(raw_array)
+
+    if np.any(valid_mask):
+        c_min = np.min(raw_array[valid_mask])
+        c_max = np.max(raw_array[valid_mask])
+        raw_array = np.nan_to_num(raw_array, nan=c_min, posinf=c_max, neginf=c_min)
+        
+        if c_max > c_min:
+            normalized_array = (raw_array - c_min) / (c_max - c_min)
+        else:
+            normalized_array = np.zeros_like(raw_array)
+    else:
+        normalized_array = np.zeros_like(raw_array)
+
+    return normalized_array

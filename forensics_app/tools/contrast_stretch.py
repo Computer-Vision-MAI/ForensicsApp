@@ -21,6 +21,9 @@ from .image_utils import extract_target_channel
 def apply_contrast_enhancement(img: Image.Image, method: str, clip_percent: int) -> Image.Image:
     """Enhances contrast by protecting colors in LAB, preserving range in high-depth, and natively stretching HSV/YCbCr."""
     mode = img.mode
+
+    if method not in ("percentile", "equalize", "adaptive"):
+        raise ValueError(f"Unsupported contrast enhancement method: '{method}'")
     
     # --- Helper to avoid duplicating the math logic ---
     def _apply_math(channel: np.ndarray) -> np.ndarray:
@@ -45,8 +48,11 @@ def apply_contrast_enhancement(img: Image.Image, method: str, clip_percent: int)
         # Luminance (L) is index 0 in LAB. Value (V) is index 2 in HSV. Luma (Y) is index 0 in YCbCr.
         target_idx = 0 if mode == "LAB" or mode == "YCbCr" else 2
         
-        # Extract, stretch, and directly replace the intensity channel
-        float_img[..., target_idx] = _apply_math(float_img[..., target_idx])
+        # Only spatial variation in the processed intensity channel matters.
+        target_channel = float_img[..., target_idx]
+        if np.all(target_channel == target_channel.flat[0]):
+            return img
+        float_img[..., target_idx] = _apply_math(target_channel)
         
         # Output natively back to the original format
         final_8bit = img_as_ubyte(float_img)
@@ -57,6 +63,9 @@ def apply_contrast_enhancement(img: Image.Image, method: str, clip_percent: int)
     is_grayscale = mode in ("L", "LA", "1") or is_high_depth
     
     target_channel, lab_image, alpha_channel = extract_target_channel(img, as_grayscale=is_grayscale)
+
+    if np.all(target_channel == target_channel.flat[0]):
+        return img
 
     # Apply the exact same math to the extracted channel
     enhanced = _apply_math(target_channel)
@@ -89,7 +98,7 @@ class ContrastStretchTool(ForensicsTool):
 
     def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult | None:
         assert document.current is not None
-        
+
         # 1. Ask the user to select the contrast enhancement method
         options = ("Percentile Stretching", "Histogram Equalization", "Adaptive (CLAHE)")
         methods = ("percentile", "equalize", "adaptive")

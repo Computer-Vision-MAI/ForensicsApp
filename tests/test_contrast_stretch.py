@@ -49,18 +49,61 @@ class ContrastStretchFunctionTests(unittest.TestCase):
         self.assertEqual(result.mode, "L")
         self.assertEqual(result.size, (10, 10))
     
-    def test_flat_image_prevents_math_crashes(self) -> None:
+    def test_flat_image_prevents_math_percentile(self) -> None:
         img = Image.new("RGB", (2, 2), color=(100, 100, 100))
         result = apply_contrast_enhancement(img, method="percentile", clip_percent=5)
         result_arr = np.array(result)
         
         self.assertEqual(result.size, (2, 2))
-        # scikit-image detects that min == max and acts as a safe no-op.
-        # The flat color is converted to LAB and back, preserving its original value.
+        # A uniform processed channel leaves the source image unchanged.
         self.assertTrue(np.all(result_arr == 100))
     
+    def test_flat_image_prevents_math_adaptive(self) -> None:
+        img = Image.new("RGB", (2, 2), color=(100, 100, 100))
+        result = apply_contrast_enhancement(img, method="adaptive", clip_percent=0)
+        result_arr = np.array(result)
+
+        self.assertEqual(result.size, (2, 2))
+        # A uniform processed channel leaves the source image unchanged.
+        self.assertTrue(np.all(result_arr == 100))
+    
+    def test_flat_image_prevents_math_equalize(self) -> None:
+        img = Image.new("RGB", (2, 2), color=(100, 100, 100))
+        result = apply_contrast_enhancement(img, method="equalize", clip_percent=0)
+        result_arr = np.array(result)
+
+        self.assertEqual(result.size, (2, 2))
+
+        # A uniform processed channel leaves the source image unchanged.
+        self.assertTrue(np.all(result_arr == 100))
+    
+    def test_uniform_non_gray_image_is_unchanged(self) -> None:
+        for method in ("percentile", "equalize", "adaptive"):
+            with self.subTest(method=method):
+                img = Image.new("RGB", (2, 2), color=(100, 50, 25))
+                self.assertIs(apply_contrast_enhancement(img, method, 0), img)
+
+    def test_uniform_intensity_ignores_variation_in_other_channels(self) -> None:
+        for mode in ("HSV", "LAB", "YCbCr", "RGBA"):
+            for method in ("percentile", "equalize", "adaptive"):
+                with self.subTest(mode=mode, method=method):
+                    img = Image.new("RGB", (2, 2), color=(100, 50, 25)).convert(mode)
+                    pixel = list(img.getpixel((0, 0)))
+                    idx = 3 if mode == "RGBA" else 1
+                    pixel[idx] -= 1
+                    img.putpixel((0, 0), tuple(pixel))
+                    self.assertIs(apply_contrast_enhancement(img, method, 0), img)
+
+    def test_unsupported_method_raises_for_flat_image(self) -> None:
+        for mode in ("L", "RGB", "HSV", "LAB", "YCbCr"):
+            with self.subTest(mode=mode):
+                img = Image.new("RGB", (2, 2), color=(100, 100, 100)).convert(mode)
+                with self.assertRaisesRegex(ValueError, "Unsupported contrast enhancement method"):
+                    apply_contrast_enhancement(img, "invalid_method", 0)
+
     def test_unsupported_method_raises_value_error(self) -> None:
         img = Image.new("RGB", (2, 2), color=(100, 100, 100))
+        img.putpixel((0, 0), (50, 50, 50)) # Add a pixel with a different value to avoid flat image detection
         with self.assertRaisesRegex(ValueError, "Unsupported contrast enhancement method"):
             apply_contrast_enhancement(img, method="invalid_method", clip_percent=0)
     

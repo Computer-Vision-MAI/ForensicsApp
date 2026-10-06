@@ -25,6 +25,12 @@ from PIL import Image
 from skimage import exposure, color, img_as_float, img_as_ubyte
 from .image_utils import extract_target_channel
 
+def _native_intensity(img: Image.Image) -> np.ndarray:
+    """Return normalized L, Y, or V from a native LAB, YCbCr, or HSV image."""
+    target_idx = 2 if img.mode == "HSV" else 0
+    return img_as_float(np.array(img))[..., target_idx]
+
+
 def apply_histogram_match(base_image: Image.Image, ref_image: Image.Image) -> Image.Image:
     """Matches the histogram of the base image to the reference image, natively handling HSV/YCbCr."""
     mode = base_image.mode
@@ -36,10 +42,13 @@ def apply_histogram_match(base_image: Image.Image, ref_image: Image.Image) -> Im
         # Luminance (L) is index 0 in LAB. Value (V) is index 2 in HSV. Luma (Y) is index 0 in YCbCr.
         target_idx = 0 if (mode == "LAB" or mode == "YCbCr") else 2
         target_base = float_base[..., target_idx]
-        
-        # We only need the intensity distribution from the reference image, 
-        # so we extract it as a 2D grayscale array regardless of its original mode.
-        target_ref, _, _ = extract_target_channel(ref_image, as_grayscale=True)
+
+        if ref_image.mode not in ("LAB", "HSV", "YCbCr"):
+            # We only need the intensity distribution from the reference image, 
+            # so we extract it as a 2D grayscale array regardless of its original mode.
+            target_ref, _, _ = extract_target_channel(ref_image, as_grayscale=True)
+        else:
+            target_ref = _native_intensity(ref_image)
         
         # Apply the matching algorithm
         float_base[..., target_idx] = exposure.match_histograms(target_base, target_ref)
@@ -54,7 +63,12 @@ def apply_histogram_match(base_image: Image.Image, ref_image: Image.Image) -> Im
     
     # Extract channels for both images using the shared utility
     target_base, lab_base, alpha_base = extract_target_channel(base_image, as_grayscale=is_grayscale)
-    target_ref, _, _ = extract_target_channel(ref_image, as_grayscale=is_grayscale)
+    if ref_image.mode not in ("LAB", "HSV", "YCbCr"):
+        # We only need the intensity distribution from the reference image, 
+        # so we extract it as a 2D grayscale array regardless of its original mode.
+        target_ref, _, _ = extract_target_channel(ref_image, as_grayscale=is_grayscale)
+    else:
+        target_ref = _native_intensity(ref_image)
 
     # Apply the matching algorithm
     matched = exposure.match_histograms(target_base, target_ref)
@@ -62,6 +76,7 @@ def apply_histogram_match(base_image: Image.Image, ref_image: Image.Image) -> Im
     # 3. Reconstruct the image and pack into 8-bits
     if is_grayscale:
         final_8bit = img_as_ubyte(matched)
+        
         output_mode = "LA" if alpha_base is not None else "L"
     else:
         lab_base[..., 0] = matched * 100.0

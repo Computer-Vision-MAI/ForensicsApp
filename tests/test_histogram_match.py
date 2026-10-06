@@ -23,7 +23,7 @@ class HistogramMatchFunctionTests(unittest.TestCase):
         self.assertEqual(result.size, (10, 10))
         
         # The base image should be shifted entirely towards the bright reference
-        self.assertTrue(np.all(result_arr > 150))
+        self.assertTrue(np.all(result_arr == 200))
 
     def test_match_rgb_to_rgb(self) -> None:
         base_img = Image.new("RGB", (4, 4), color=(100, 50, 50))
@@ -118,6 +118,20 @@ class HistogramMatchFunctionTests(unittest.TestCase):
         #4. The A and B channels are +128 in the array representation
         self.assertTrue(np.all(result_arr[..., 1] == base_img.getpixel((0, 0))[1] + 128))
         self.assertTrue(np.all(result_arr[..., 2] == base_img.getpixel((0, 0))[2] + 128))
+
+    def test_native_reference_intensity_in_both_base_branches(self) -> None:
+        for base_mode in ("L", "HSV"):
+            for ref_mode in ("LAB", "YCbCr", "HSV"):
+                with self.subTest(base_mode=base_mode, ref_mode=ref_mode):
+                    base = Image.new(base_mode, (2, 2), 50 if base_mode == "L" else (10, 20, 50))
+                    ref_color = (10, 20, 200) if ref_mode == "HSV" else (200, 10, 20)
+                    reference = Image.new(ref_mode, (2, 2), ref_color)
+                    result = apply_histogram_match(base, reference)
+                    actual = np.array(result)
+                    if base_mode == "HSV":
+                        np.testing.assert_array_equal(actual[..., :2], np.array(base)[..., :2])
+                        actual = actual[..., 2]
+                    self.assertTrue(np.all(actual == 200))
 
     def test_match_la_preserves_alpha(self) -> None:
         # Base is grayscale with alpha. Ref is standard grayscale.
