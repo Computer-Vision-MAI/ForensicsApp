@@ -19,10 +19,10 @@ def apply_canny_edge(
     """Detect edges and return a binary mask or an overlay on the source colors."""
     mode = img.mode
     is_high_depth = mode in ("I", "F") or mode.startswith("I;16")
+    is_gray = mode in ("L", "I", "F") or mode.startswith("I;16")
+    
     if is_high_depth:
-        gray_arr = normalize_high_depth_image(img)
-        low_threshold /= 255.0
-        high_threshold /= 255.0
+        gray_arr = (normalize_high_depth_image(img) * 255.0).astype(np.uint8)
     else:
         gray_arr = np.array(img.convert("L"))
 
@@ -33,7 +33,12 @@ def apply_canny_edge(
         high_threshold=high_threshold,
     )
     if superimpose:
-        rgb_arr = np.array(img.convert("RGB"), dtype=np.float32)
+        # If the image is high-depth, we need to convert it to a standard RGB array for superimposition.
+        # But we use the normlized grayscale to ensure we don't lose the high-depth information in the edge detection process.
+        if is_high_depth:
+            rgb_arr = np.stack((gray_arr,) * 3, axis=-1).astype(np.float32)
+        else:
+            rgb_arr = np.array(img.convert("RGB"), dtype=np.float32)
         edge_color = np.array([255, 0, 0], dtype=np.float32)
         rgb_arr[edges] = rgb_arr[edges] * (1.0 - alpha) + edge_color * alpha
         return Image.fromarray(np.clip(rgb_arr, 0, 255).astype(np.uint8))
