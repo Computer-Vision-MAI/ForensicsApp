@@ -21,6 +21,10 @@ from .image_utils import extract_target_channel
 def apply_contrast_enhancement(img: Image.Image, method: str, clip_percent: int) -> Image.Image:
     """Enhances contrast by protecting colors in LAB, preserving range in high-depth, and natively stretching HSV/YCbCr."""
     mode = img.mode
+
+    float_img = img_as_float(np.array(img))
+    if len(np.unique(float_img)) <= 1:
+        return img  # No-op for flat images to prevent math errors
     
     # --- Helper to avoid duplicating the math logic ---
     def _apply_math(channel: np.ndarray) -> np.ndarray:
@@ -89,7 +93,7 @@ class ContrastStretchTool(ForensicsTool):
 
     def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult | None:
         assert document.current is not None
-        
+
         # 1. Ask the user to select the contrast enhancement method
         options = ("Percentile Stretching", "Histogram Equalization", "Adaptive (CLAHE)")
         methods = ("percentile", "equalize", "adaptive")

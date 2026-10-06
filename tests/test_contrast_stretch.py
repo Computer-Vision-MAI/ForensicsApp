@@ -49,7 +49,7 @@ class ContrastStretchFunctionTests(unittest.TestCase):
         self.assertEqual(result.mode, "L")
         self.assertEqual(result.size, (10, 10))
     
-    def test_flat_image_prevents_math_crashes(self) -> None:
+    def test_flat_image_prevents_math_percentile(self) -> None:
         img = Image.new("RGB", (2, 2), color=(100, 100, 100))
         result = apply_contrast_enhancement(img, method="percentile", clip_percent=5)
         result_arr = np.array(result)
@@ -59,8 +59,30 @@ class ContrastStretchFunctionTests(unittest.TestCase):
         # The flat color is converted to LAB and back, preserving its original value.
         self.assertTrue(np.all(result_arr == 100))
     
+    def test_flat_image_prevents_math_adaptive(self) -> None:
+            img = Image.new("RGB", (2, 2), color=(100, 100, 100))
+            result = apply_contrast_enhancement(img, method="adaptive", clip_percent=0)
+            result_arr = np.array(result)
+            
+            self.assertEqual(result.size, (2, 2))
+            # scikit-image detects that min == max and acts as a safe no-op.
+            # The flat color is converted to LAB and back, preserving its original value.
+            self.assertTrue(np.all(result_arr == 100))
+    
+    def test_flat_image_prevents_math_equalize(self) -> None:
+            img = Image.new("RGB", (2, 2), color=(100, 100, 100))
+            result = apply_contrast_enhancement(img, method="equalize", clip_percent=0)
+            result_arr = np.array(result)
+            
+            self.assertEqual(result.size, (2, 2))
+            
+            # scikit-image detects that min == max and acts as a safe no-op.
+            # The flat color is converted to LAB and back, preserving its original value.
+            self.assertTrue(np.all(result_arr == 100))
+    
     def test_unsupported_method_raises_value_error(self) -> None:
         img = Image.new("RGB", (2, 2), color=(100, 100, 100))
+        img.putpixel((0, 0), (50, 50, 50)) # Add a pixel with a different value to avoid flat image detection
         with self.assertRaisesRegex(ValueError, "Unsupported contrast enhancement method"):
             apply_contrast_enhancement(img, method="invalid_method", clip_percent=0)
     

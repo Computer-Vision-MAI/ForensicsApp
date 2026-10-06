@@ -1,5 +1,7 @@
 """Register course functionality here so it appears in the sidebar."""
 
+
+
 from .channel_split import ChannelSplitTool
 from .channel_swap import ChannelSwapTool
 from .grayscale import GrayscaleTool
@@ -10,6 +12,7 @@ from .histogram import HistogramTool
 from .contrast_stretch import ContrastStretchTool
 from .convert_mode import ConvertModeTool
 from .histogram_match import HistogramMatchTool
+from .canny_edge import CannyEdgeTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -24,6 +27,7 @@ def build_tool_registry() -> ToolRegistry:
             HistogramTool(),
             ContrastStretchTool(),
             HistogramMatchTool(),
+            CannyEdgeTool()
         ]
     )
 

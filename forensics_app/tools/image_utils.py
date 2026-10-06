@@ -21,6 +21,7 @@ def extract_target_channel(
     supported_modes = {
         "1", "L", "I", "F", "P", "PA", "RGB", "CMYK", "RGBA", "RGBX", "RGBa", "LA", "La"
     }
+
     if mode not in supported_modes and not mode.startswith("I;16"):
         raise ValueError(f"Unsupported image mode: '{mode}'. Cannot safely extract channels.")
 
@@ -31,20 +32,30 @@ def extract_target_channel(
     
     alpha_channel = None
     
-    # 3. Get raw normalized float data [0, 1]
+    # 3. Get raw normalized float data [0, 1] without stretching or clipping
     if is_high_depth:
-        raw_array = np.asarray(img, dtype=np.float64)
-        valid_mask = np.isfinite(raw_array)
+
+        orig_array = np.asarray(img)
+        orig_dtype = orig_array.dtype
         
+        # Handle high-depth images by converting to float64 for calculations
+        raw_array = orig_array.astype(np.float64)
+        valid_mask = np.isfinite(raw_array)
+
         if np.any(valid_mask):
-            c_min = np.min(raw_array[valid_mask])
-            c_max = np.max(raw_array[valid_mask])
-            raw_array = np.nan_to_num(raw_array, nan=c_min, posinf=c_max, neginf=c_min)
-            
-            if c_max > c_min:
-                float_img = (raw_array - c_min) / (c_max - c_min)
-            else:
-                float_img = np.zeros_like(raw_array)
+                # Extract the limits based on the original type, not float64
+                if orig_dtype.kind in ('i', 'u'):  # If it is a signed or unsigned integer
+                    limits = np.iinfo(orig_dtype)
+                else:  # If it is float type F
+                    limits = np.finfo(orig_dtype)
+                    
+                c_min = float(limits.min)
+                c_max = float(limits.max)
+                
+                raw_array = np.nan_to_num(raw_array, nan=c_min, posinf=c_max, neginf=c_min)
+                
+                if c_max > c_min:
+                    float_img = (raw_array - c_min) / (c_max - c_min)
         else:
             float_img = np.zeros_like(raw_array)
             

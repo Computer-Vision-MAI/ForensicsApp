@@ -36,10 +36,14 @@ def apply_histogram_match(base_image: Image.Image, ref_image: Image.Image) -> Im
         # Luminance (L) is index 0 in LAB. Value (V) is index 2 in HSV. Luma (Y) is index 0 in YCbCr.
         target_idx = 0 if (mode == "LAB" or mode == "YCbCr") else 2
         target_base = float_base[..., target_idx]
-        
-        # We only need the intensity distribution from the reference image, 
-        # so we extract it as a 2D grayscale array regardless of its original mode.
-        target_ref, _, _ = extract_target_channel(ref_image, as_grayscale=True)
+
+        if ref_image.mode not in ("LAB", "HSV", "YCbCr"):
+            # We only need the intensity distribution from the reference image, 
+            # so we extract it as a 2D grayscale array regardless of its original mode.
+            target_ref, _, _ = extract_target_channel(ref_image, as_grayscale=True)
+        else:
+            target_ref_idx = 0 if (ref_image.mode == "LAB" or ref_image.mode == "YCbCr") else 2
+            target_ref = img_as_float(np.array(ref_image))[..., target_ref_idx]
         
         # Apply the matching algorithm
         float_base[..., target_idx] = exposure.match_histograms(target_base, target_ref)
@@ -54,7 +58,13 @@ def apply_histogram_match(base_image: Image.Image, ref_image: Image.Image) -> Im
     
     # Extract channels for both images using the shared utility
     target_base, lab_base, alpha_base = extract_target_channel(base_image, as_grayscale=is_grayscale)
-    target_ref, _, _ = extract_target_channel(ref_image, as_grayscale=is_grayscale)
+    if ref_image.mode not in ("LAB", "HSV", "YCbCr"):
+        # We only need the intensity distribution from the reference image, 
+        # so we extract it as a 2D grayscale array regardless of its original mode.
+        target_ref, _, _ = extract_target_channel(ref_image, as_grayscale=is_grayscale)
+    else:
+        target_ref_idx = 0 if (ref_image.mode == "LAB" or ref_image.mode == "YCbCr") else 2
+        target_ref = img_as_float(np.array(ref_image))[..., target_ref_idx]
 
     # Apply the matching algorithm
     matched = exposure.match_histograms(target_base, target_ref)
@@ -62,6 +72,7 @@ def apply_histogram_match(base_image: Image.Image, ref_image: Image.Image) -> Im
     # 3. Reconstruct the image and pack into 8-bits
     if is_grayscale:
         final_8bit = img_as_ubyte(matched)
+        
         output_mode = "LA" if alpha_base is not None else "L"
     else:
         lab_base[..., 0] = matched * 100.0

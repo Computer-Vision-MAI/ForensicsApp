@@ -23,7 +23,7 @@ class HistogramMatchFunctionTests(unittest.TestCase):
         self.assertEqual(result.size, (10, 10))
         
         # The base image should be shifted entirely towards the bright reference
-        self.assertTrue(np.all(result_arr > 150))
+        self.assertTrue(np.all(result_arr == 200))
 
     def test_match_rgb_to_rgb(self) -> None:
         base_img = Image.new("RGB", (4, 4), color=(100, 50, 50))
