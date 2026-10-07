@@ -1,7 +1,11 @@
 from __future__ import annotations
+from typing import Callable
+
 import numpy as np
 from PIL import Image
 from skimage import color, img_as_float
+
+from forensics_app.core.channels import ALPHA, MODE_CHANNELS, NUMERIC_MODES
 
 def extract_target_channel(
     img: Image.Image, as_grayscale: bool
@@ -90,3 +94,60 @@ def normalize_high_depth_image(img: Image.Image) -> np.ndarray:
         normalized_array = np.zeros_like(raw_array)
 
     return normalized_array
+
+def is_grayscale(img: Image.Image) -> bool:
+    """Return True if the image has a single intensity channel, with or without alpha."""
+    return img.mode in ("1", "L", "LA", "La") or img.mode in NUMERIC_MODES
+
+
+def image_to_unit_array(img: Image.Image) -> tuple[np.ndarray, np.ndarray | None]:
+    """Return the pixels as floats in [0, 1], plus the alpha channel if there is one.
+
+    Grayscale modes (1, L, LA, La and the numeric ones) give an H x W array; every
+    other mode is converted to RGB and gives an H x W x 3 array. Alpha is returned
+    apart, as 8-bit, so filters never touch it.
+    """
+    if img.mode not in MODE_CHANNELS:
+        raise ValueError(f"Unsupported image mode: '{img.mode}'.")
+    if img.mode in NUMERIC_MODES:
+        return normalize_high_depth_image(img), None
+
+    is_gray = is_grayscale(img)
+    # Pillow cannot convert La to other modes directly
+    if img.mode == "La":
+        img = img.convert("LA")
+    has_alpha = ALPHA in MODE_CHANNELS[img.mode] or "transparency" in img.info
+
+    if has_alpha:
+        arr = np.array(img.convert("LA" if is_gray else "RGBA"))
+        colors = arr[..., 0] if is_gray else arr[..., :3]
+        return img_as_float(colors), arr[..., -1]
+    return img_as_float(np.array(img.convert("L" if is_gray else "RGB"))), None
+
+
+def unit_array_to_image(pixels: np.ndarray, alpha: np.ndarray | None = None) -> Image.Image:
+    """Return [0, 1] floats as an 8-bit L or RGB image (LA or RGBA with ``alpha``).
+
+    Values outside [0, 1] are clipped.
+    """
+    data = np.round(np.clip(pixels, 0.0, 1.0) * 255.0).astype(np.uint8)
+    if alpha is not None:
+        data = np.dstack((data, alpha))
+    return Image.fromarray(data)
+
+
+def per_channel(function: Callable[[np.ndarray], np.ndarray], pixels: np.ndarray) -> np.ndarray:
+    """Apply a 2-D ``function`` to a gray array, or to each channel of a color one."""
+    # A gray image has a single channel: filter it directly
+    if pixels.ndim == 2:
+        return function(pixels)
+    # A color image is filtered one channel at a time (red, then green, then blue)
+    # and the three results are stacked back into one color image. This is the same as:
+    #   channels = []
+    #   for index in range(3):
+    #       channels.append(function(pixels[..., index]))
+    #   return np.dstack(channels)
+    # Callers that need extra arguments pass a lambda, a small function without a name:
+    #   lambda channel: filters.gaussian(channel, sigma=2)
+    # means "given a channel, blur it with sigma 2"
+    return np.dstack([function(pixels[..., index]) for index in range(pixels.shape[-1])])

@@ -3,7 +3,13 @@ import numpy as np
 from PIL import Image
 from unittest.mock import patch, MagicMock
 
-from forensics_app.tools.image_utils import extract_target_channel, normalize_high_depth_image
+from forensics_app.tools.image_utils import (
+    extract_target_channel,
+    image_to_unit_array,
+    normalize_high_depth_image,
+    per_channel,
+    unit_array_to_image,
+)
 
 class ExtractTargetChannelTest(unittest.TestCase):
     """Unit tests for the shared image channel extraction utility."""
@@ -157,6 +163,83 @@ class NormalizeHighDepthImageTest(unittest.TestCase):
         # Finite values define the range; NaN/Inf map to its endpoints.
         np.testing.assert_array_equal(target, [[0.0, 0.0], [1.0, 1.0]])
         self.assertLess(target[0, 1], target[1, 0])
+
+
+class UnitArrayTest(unittest.TestCase):
+    """Unit tests for the float conversions shared by the filtering tools."""
+
+    def test_grayscale_modes_give_a_2d_array(self) -> None:
+        for mode in ("1", "L"):
+            with self.subTest(mode=mode):
+                pixels, alpha = image_to_unit_array(Image.new(mode, (3, 2), 255))
+                self.assertEqual(pixels.shape, (2, 3))
+                self.assertTrue(np.all(pixels == 1.0))
+                self.assertIsNone(alpha)
+
+    def test_color_modes_are_converted_to_rgb(self) -> None:
+        source = Image.new("RGB", (3, 2), (255, 0, 51))
+        for mode in ("RGB", "RGBX", "CMYK", "P"):
+            with self.subTest(mode=mode):
+                pixels, alpha = image_to_unit_array(source.convert(mode))
+                self.assertEqual(pixels.shape, (2, 3, 3))
+                np.testing.assert_allclose(pixels[0, 0], [1.0, 0.0, 0.2])
+                self.assertIsNone(alpha)
+
+    def test_alpha_is_returned_apart(self) -> None:
+        cases = {
+            "RGBA": Image.new("RGBA", (2, 2), (10, 20, 30, 77)),
+            "LA": Image.new("LA", (2, 2), (10, 77)),
+            "La": Image.new("LA", (2, 2), (10, 77)).convert("La"),
+        }
+        for mode, image in cases.items():
+            with self.subTest(mode=mode):
+                pixels, alpha = image_to_unit_array(image)
+                self.assertEqual(pixels.ndim, 3 if mode == "RGBA" else 2)
+                self.assertTrue(np.all(alpha == 77))
+
+    def test_palette_transparency_becomes_alpha(self) -> None:
+        image = Image.new("P", (2, 2))
+        image.putpalette([50, 50, 50, 150, 150, 150] + [0] * 762)
+        image.putdata([0, 1, 0, 1])
+        image.info["transparency"] = 0
+        pixels, alpha = image_to_unit_array(image)
+        self.assertEqual(pixels.shape, (2, 2, 3))
+        np.testing.assert_array_equal(alpha, [[0, 255], [0, 255]])
+
+    def test_numeric_modes_are_stretched_to_the_unit_range(self) -> None:
+        image = Image.fromarray(np.array([[1000, 2000], [3000, 5000]], dtype=np.int32))
+        pixels, alpha = image_to_unit_array(image)
+        np.testing.assert_allclose(pixels, [[0.0, 0.25], [0.5, 1.0]])
+        self.assertIsNone(alpha)
+
+    def test_unknown_mode_is_rejected(self) -> None:
+        image = MagicMock()
+        image.mode = "XYZ"
+        with self.assertRaisesRegex(ValueError, "Unsupported image mode"):
+            image_to_unit_array(image)
+
+    def test_round_trip_keeps_8bit_images(self) -> None:
+        data = np.random.default_rng(0).integers(0, 256, (5, 6, 4), dtype=np.uint8)
+        for mode, array in (("L", data[..., 0]), ("LA", data[..., :2]), ("RGB", data[..., :3]), ("RGBA", data)):
+            with self.subTest(mode=mode):
+                image = Image.fromarray(array, mode=mode)
+                result = unit_array_to_image(*image_to_unit_array(image))
+                self.assertEqual(result.mode, mode)
+                self.assertEqual(result.tobytes(), image.tobytes())
+
+    def test_values_outside_the_unit_range_are_clipped(self) -> None:
+        result = unit_array_to_image(np.array([[-0.5, 0.5, 1.5]]))
+        np.testing.assert_array_equal(np.asarray(result), [[0, 128, 255]])
+
+    def test_per_channel_applies_the_function_to_each_channel(self) -> None:
+        gray = np.arange(6.0).reshape(2, 3)
+        np.testing.assert_array_equal(per_channel(np.fliplr, gray), np.fliplr(gray))
+
+        color = np.arange(18.0).reshape(2, 3, 3)
+        seen = []
+        result = per_channel(lambda channel: seen.append(channel.shape) or channel * 2, color)
+        self.assertEqual(seen, [(2, 3)] * 3)
+        np.testing.assert_array_equal(result, color * 2)
 
 if __name__ == "__main__":
     unittest.main()
