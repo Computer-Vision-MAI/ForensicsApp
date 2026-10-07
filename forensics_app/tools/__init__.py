@@ -13,6 +13,9 @@ from .contrast_stretch import ContrastStretchTool
 from .convert_mode import ConvertModeTool
 from .histogram_match import HistogramMatchTool
 from .canny_edge import CannyEdgeTool
+from .convolution import ConvolutionTool
+from .filters import FiltersTool
+from .sharpen import SharpenTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -27,7 +30,10 @@ def build_tool_registry() -> ToolRegistry:
             HistogramTool(),
             ContrastStretchTool(),
             HistogramMatchTool(),
-            CannyEdgeTool()
+            CannyEdgeTool(),
+            ConvolutionTool(),
+            FiltersTool(),
+            SharpenTool(),
         ]
     )
 

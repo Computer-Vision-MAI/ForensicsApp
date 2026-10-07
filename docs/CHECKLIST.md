@@ -18,3 +18,12 @@ Python, tkinter, scikit-learn, numpy, image processing/manipulation
 - [x] Masking
 - [x] Histogram visualization
 - [x] Contrast stretching
+
+## Week 3
+
+### Functionalities:
+- [x] Convolution with arbitrary kernel
+- [x] Filters from skimage.filters
+- [x] Canny edge detection
+- [x] Edge visualization (superimposed on original)
+- [x] Image sharpening
