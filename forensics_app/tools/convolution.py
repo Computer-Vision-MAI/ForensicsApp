@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 import tkinter as tk
 from tkinter import simpledialog
 
@@ -111,14 +112,14 @@ def gradient_kernel(rows: int, cols: int, horizontal: bool) -> np.ndarray:
     return kernel / kernel[kernel > 0].sum()
 
 
-def random_kernel(rows: int, cols: int, seed: int | None = None) -> np.ndarray:
+def random_kernel(rows: int, cols: int, seed: int = 0) -> np.ndarray:
     """Return random positive weights that add up to 1; the same ``seed`` gives the same kernel."""
     kernel = np.random.default_rng(seed).random((rows, cols))
     # Divide by the total so the weights add up to 1 and the brightness is kept
     return kernel / kernel.sum()
 
 
-def build_kernel(name: str, rows: int, cols: int, seed: int | None = None) -> np.ndarray:
+def build_kernel(name: str, rows: int, cols: int, seed: int = 0) -> np.ndarray:
     """Return the ``rows`` x ``cols`` preset kernel called ``name``.
 
     ``seed`` only matters for the random kernel. Raises ValueError if ``name`` is
@@ -228,9 +229,9 @@ class ConvolutionTool(ForensicsTool):
         if cols is None:
             return None
 
-        # Drawn here and shown in the results so a random kernel can be reproduced
-        seed = int(np.random.default_rng().integers(1_000_000)) if name == RANDOM else None
-        kernel = build_kernel(name, rows, cols, seed)
+        # A new seed each run, shown in the results so a random kernel can be reproduced
+        seed = secrets.randbelow(1_000_000) if name == RANDOM else None
+        kernel = build_kernel(name, rows, cols, seed or 0)
         output = convolve_image(source, kernel)
 
         details = {

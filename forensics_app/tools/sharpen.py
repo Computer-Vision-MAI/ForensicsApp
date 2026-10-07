@@ -26,7 +26,8 @@ METHOD_LABELS = (
 
 DEFAULT_SIGMA = 2.0
 DEFAULT_AMOUNT = 1.5
-MAX_SIGMA = 100.0
+# The blur runs on the interface thread: 25 keeps a 12-megapixel photo under 4 seconds
+MAX_SIGMA = 25.0
 MAX_AMOUNT = 10.0
 
 

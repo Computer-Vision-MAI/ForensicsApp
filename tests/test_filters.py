@@ -73,8 +73,9 @@ class FilterFunctionTests(unittest.TestCase):
         np.testing.assert_allclose(median(pixels, 5)[2:-2, 2:-2], expected[2:-2, 2:-2])
 
     def test_median_rejects_an_empty_window(self) -> None:
+        pixels = noise(4, 4)
         with self.assertRaises(ValueError):
-            median(noise(4, 4), 0)
+            median(pixels, 0)
 
     def test_edge_operators_respond_only_at_the_edge(self) -> None:
         for operator in filters.EDGE_OPERATORS:
@@ -92,20 +93,46 @@ class FilterFunctionTests(unittest.TestCase):
             np.testing.assert_allclose(result[..., index], skfilters.sobel(pixels[..., index]))
 
     def test_edges_reject_unknown_operators(self) -> None:
+        pixels = noise(4, 4)
         with self.assertRaisesRegex(ValueError, "Unsupported edge operator"):
-            edges(noise(4, 4), "roberts")
+            edges(pixels, "roberts")
 
     def test_otsu_separates_two_gray_levels(self) -> None:
         pixels = np.full((8, 8), 0.2)
         pixels[:, 4:] = 0.8
         binary, threshold = otsu(pixels)
-        self.assertTrue(0.2 <= threshold < 0.8)
+        self.assertGreaterEqual(threshold, 0.2)
+        self.assertLess(threshold, 0.8)
         np.testing.assert_array_equal(binary, pixels > 0.5)
+
+    def test_otsu_ignores_fully_transparent_pixels(self) -> None:
+        # Visible levels 0.4 and 0.6, and a large transparent area hiding white
+        pixels = np.full((10, 10), 1.0)
+        pixels[:2, :5] = 0.4
+        pixels[:2, 5:] = 0.6
+        alpha = np.zeros((10, 10), dtype=np.uint8)
+        alpha[:2] = 255
+
+        _binary, blind_threshold = otsu(pixels)
+        self.assertGreaterEqual(blind_threshold, 0.6)
+
+        binary, threshold = otsu(pixels, alpha)
+        self.assertGreaterEqual(threshold, 0.4)
+        self.assertLess(threshold, 0.6)
+        np.testing.assert_array_equal(binary[:2, :5], 0.0)
+        np.testing.assert_array_equal(binary[:2, 5:], 1.0)
+
+    def test_otsu_of_a_fully_transparent_image_uses_every_pixel(self) -> None:
+        pixels = np.full((4, 4), 0.2)
+        pixels[:, 2:] = 0.8
+        _binary, expected = otsu(pixels)
+        _binary, threshold = otsu(pixels, np.zeros((4, 4), dtype=np.uint8))
+        self.assertEqual(threshold, expected)
 
     def test_otsu_reduces_color_to_one_channel(self) -> None:
         binary, _threshold = otsu(noise(8, 9, 3))
         self.assertEqual(binary.shape, (8, 9))
-        self.assertTrue(set(np.unique(binary)) <= {0.0, 1.0})
+        self.assertLessEqual(set(np.unique(binary)), {0.0, 1.0})
 
 
 class ApplyFilterTests(unittest.TestCase):

@@ -85,8 +85,9 @@ class SharpenFunctionTests(unittest.TestCase):
 
 class SharpenImageTests(unittest.TestCase):
     def test_rejects_unknown_methods(self) -> None:
+        image = Image.new("L", (4, 4))
         with self.assertRaisesRegex(ValueError, "Unsupported sharpening method"):
-            sharpen(Image.new("L", (4, 4)), "laplacian", 2.0)
+            sharpen(image, "laplacian", 2.0)
 
     def test_detail_of_a_flat_image_is_mid_gray(self) -> None:
         result = sharpen(Image.new("L", (6, 6), 90), DETAIL, 2.0)

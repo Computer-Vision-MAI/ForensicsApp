@@ -88,10 +88,17 @@ def edges(pixels: np.ndarray, operator: str) -> np.ndarray:
     return per_channel(EDGE_OPERATORS[operator], pixels)
 
 
-def otsu(pixels: np.ndarray) -> tuple[np.ndarray, float]:
-    """Return the grayscale ``pixels`` binarized to 0.0 / 1.0, and the Otsu threshold used."""
+def otsu(pixels: np.ndarray, alpha: np.ndarray | None = None) -> tuple[np.ndarray, float]:
+    """Return the grayscale ``pixels`` binarized to 0.0 / 1.0, and the Otsu threshold used.
+
+    With ``alpha``, fully transparent pixels do not count towards the threshold.
+    """
     gray = to_gray(pixels)
-    threshold = float(filters.threshold_otsu(gray))
+    visible = gray
+    # The colors hidden under transparent pixels would shift the threshold
+    if alpha is not None and np.any(alpha > 0):
+        visible = gray[alpha > 0]
+    threshold = float(filters.threshold_otsu(visible))
     return (gray > threshold).astype(float), threshold
 
 
@@ -125,7 +132,7 @@ def apply_filter(
             parameters.get("amount", DEFAULT_AMOUNT),
         )
     else:
-        result, threshold = otsu(pixels)
+        result, threshold = otsu(pixels, alpha)
         measured["Threshold"] = f"{threshold * 255:.1f} of 255"
     return unit_array_to_image(result, alpha), measured
 

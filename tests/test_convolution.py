@@ -124,8 +124,9 @@ class ConvolvePixelsTests(unittest.TestCase):
         np.testing.assert_allclose(convolve_pixels(impulse, kernel)[1:4, 1:4], kernel, atol=1e-12)
 
     def test_rejects_kernels_that_are_not_2d(self) -> None:
+        pixels, kernel = noise(4, 4), np.ones(3)
         with self.assertRaises(ValueError):
-            convolve_pixels(noise(4, 4), np.ones(3))
+            convolve_pixels(pixels, kernel)
 
 
 class ConvolveImageTests(unittest.TestCase):
