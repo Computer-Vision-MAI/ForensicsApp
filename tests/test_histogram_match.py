@@ -5,7 +5,16 @@ import numpy as np
 from PIL import Image
 
 from forensics_app.core import ImageDocument
-from forensics_app.tools.histogram_match import apply_histogram_match, HistogramMatchTool
+from forensics_app.tools.convert_mode import convert_mode
+from forensics_app.tools.histogram_match import (
+    LIGHTNESS,
+    LUMA,
+    NATIVE_INTENSITY,
+    VALUE,
+    HistogramMatchTool,
+    apply_histogram_match,
+    reference_intensity,
+)
 
 class HistogramMatchFunctionTests(unittest.TestCase):
     """Unit tests for the apply_histogram_match mathematical orchestration."""
@@ -119,19 +128,72 @@ class HistogramMatchFunctionTests(unittest.TestCase):
         self.assertTrue(np.all(result_arr[..., 1] == base_img.getpixel((0, 0))[1] + 128))
         self.assertTrue(np.all(result_arr[..., 2] == base_img.getpixel((0, 0))[2] + 128))
 
-    def test_native_reference_intensity_in_both_base_branches(self) -> None:
-        for base_mode in ("L", "HSV"):
-            for ref_mode in ("LAB", "YCbCr", "HSV"):
-                with self.subTest(base_mode=base_mode, ref_mode=ref_mode):
-                    base = Image.new(base_mode, (2, 2), 50 if base_mode == "L" else (10, 20, 50))
-                    ref_color = (10, 20, 200) if ref_mode == "HSV" else (200, 10, 20)
-                    reference = Image.new(ref_mode, (2, 2), ref_color)
-                    result = apply_histogram_match(base, reference)
-                    actual = np.array(result)
-                    if base_mode == "HSV":
-                        np.testing.assert_array_equal(actual[..., :2], np.array(base)[..., :2])
-                        actual = actual[..., 2]
-                    self.assertTrue(np.all(actual == 200))
+    def test_native_reference_is_read_directly_when_it_holds_the_base_intensity(self) -> None:
+        # L and YCbCr both hold luma; HSV holds value; LAB holds lightness
+        for base_mode, ref_mode in (("L", "YCbCr"), ("YCbCr", "YCbCr"), ("HSV", "HSV"), ("LAB", "LAB")):
+            with self.subTest(base_mode=base_mode, ref_mode=ref_mode):
+                base = Image.new(base_mode, (2, 2), 50 if base_mode == "L" else (50, 20, 50))
+                ref_color = (10, 20, 200) if ref_mode == "HSV" else (200, 10, 20)
+                reference = Image.new(ref_mode, (2, 2), ref_color)
+                actual = np.array(apply_histogram_match(base, reference))
+                if base_mode != "L":
+                    actual = actual[..., NATIVE_INTENSITY[base_mode][1]]
+                self.assertTrue(np.all(actual == 200))
+
+    def test_native_reference_is_converted_when_it_holds_another_intensity(self) -> None:
+        # The reference stores V = 200, but its luma and its lightness are other numbers
+        reference = Image.new("HSV", (2, 2), (10, 200, 200))
+        rgb_reference = reference.convert("RGB")
+
+        gray = np.array(apply_histogram_match(Image.new("L", (2, 2), 50), reference))
+        np.testing.assert_array_equal(gray, np.array(rgb_reference.convert("L")))
+        self.assertTrue(np.all(gray < 200))
+
+        ycbcr = np.array(apply_histogram_match(Image.new("YCbCr", (2, 2), (50, 100, 150)), reference))
+        np.testing.assert_array_equal(ycbcr[..., 0], np.array(rgb_reference.convert("L")))
+
+        # And the other way round: an HSV base takes the largest of R, G and B, not Y
+        luma_reference = Image.new("YCbCr", (2, 2), (120, 90, 200))
+        hsv = np.array(apply_histogram_match(Image.new("HSV", (2, 2), (10, 20, 50)), luma_reference))
+        expected = np.array(luma_reference.convert("RGB")).max(axis=-1)
+        np.testing.assert_array_equal(hsv[..., 2], expected)
+        self.assertTrue(np.all(hsv[..., 2] != 120))
+
+    def test_reference_intensity_measures_one_color_in_three_ways(self) -> None:
+        red = Image.new("RGB", (2, 2), (255, 0, 0))
+
+        self.assertAlmostEqual(float(reference_intensity(red, LUMA)[0, 0]), 76 / 255)
+        self.assertAlmostEqual(float(reference_intensity(red, VALUE)[0, 0]), 1.0)
+        self.assertAlmostEqual(float(reference_intensity(red, LIGHTNESS)[0, 0]), 0.5324, places=3)
+
+    def test_reference_intensity_value_of_single_channel_references(self) -> None:
+        gray = Image.new("L", (2, 2), 51)
+        np.testing.assert_allclose(reference_intensity(gray, VALUE), 0.2)
+
+        # High-depth images are stretched to their own range
+        high_depth = Image.fromarray(np.array([[1000, 2000], [3000, 5000]], dtype=np.uint16))
+        np.testing.assert_allclose(reference_intensity(high_depth, VALUE), [[0.0, 0.25], [0.5, 1.0]])
+
+    def test_matching_a_picture_against_itself_in_another_mode_changes_almost_nothing(self) -> None:
+        # Only conversion rounding may remain; mixing intensities used to shift up to 116 levels
+        pixels = np.random.default_rng(0).integers(0, 256, (32, 32, 3), dtype=np.uint8)
+        picture = Image.fromarray(pixels)
+        versions = {mode: picture if mode == "RGB" else convert_mode(picture, mode) for mode in ("RGB", "LAB", "HSV", "YCbCr")}
+
+        for base_mode, ref_mode, tolerance in (
+            ("HSV", "RGB", 0),
+            ("YCbCr", "RGB", 1),
+            ("LAB", "RGB", 3),
+            # These references are 8-bit conversions of the picture, so they add their own rounding
+            ("LAB", "HSV", 8),
+            ("HSV", "YCbCr", 8),
+            ("RGB", "HSV", 8),
+        ):
+            with self.subTest(base_mode=base_mode, ref_mode=ref_mode):
+                base = versions[base_mode]
+                result = apply_histogram_match(base, versions[ref_mode])
+                difference = np.abs(np.array(result).astype(int) - np.array(base).astype(int))
+                self.assertLessEqual(int(difference.max()), tolerance)
 
     def test_match_la_preserves_alpha(self) -> None:
         # Base is grayscale with alpha. Ref is standard grayscale.

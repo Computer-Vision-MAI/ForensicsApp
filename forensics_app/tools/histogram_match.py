@@ -7,48 +7,63 @@ from tkinter import filedialog, messagebox
 
 import numpy as np
 from PIL import Image, UnidentifiedImageError
-from skimage import exposure, color, img_as_ubyte
+from skimage import exposure, color, img_as_float, img_as_ubyte
 
 from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
-from .image_utils import extract_target_channel
+from .image_utils import extract_target_channel, image_to_unit_array
 
 OPEN_TYPES = [
     ("Image files", "*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp"),
     ("All files", "*.*"),
 ]
 
+# The three ways of measuring how bright a pixel is. They give different numbers
+# for the same color, so the base and the reference must always use the same one
+LIGHTNESS = "lightness"  # L* of LAB
+LUMA = "luma"  # Y of YCbCr, and the gray of mode L
+VALUE = "value"  # V of HSV: the largest of red, green and blue
 
-import warnings
-import numpy as np
-from PIL import Image
-from skimage import exposure, color, img_as_float, img_as_ubyte
-from .image_utils import extract_target_channel
+# The modes that are matched without leaving their color space: which intensity
+# they hold and in which channel
+NATIVE_INTENSITY = {"LAB": (LIGHTNESS, 0), "YCbCr": (LUMA, 0), "HSV": (VALUE, 2)}
 
-def _native_intensity(img: Image.Image) -> np.ndarray:
-    """Return normalized L, Y, or V from a native LAB, YCbCr, or HSV image."""
-    target_idx = 2 if img.mode == "HSV" else 0
-    return img_as_float(np.array(img))[..., target_idx]
+
+def reference_intensity(ref_image: Image.Image, kind: str) -> np.ndarray:
+    """Return the ``kind`` of intensity (LIGHTNESS, LUMA or VALUE) of the reference, in [0, 1].
+
+    Raises ValueError if the reference mode is not supported.
+    """
+    if ref_image.mode in NATIVE_INTENSITY:
+        native_kind, index = NATIVE_INTENSITY[ref_image.mode]
+        if native_kind == kind:
+            # The reference already stores this intensity: read it as it is
+            return img_as_float(np.array(ref_image))[..., index]
+        # It stores another one (e.g. V when L* is needed): compute it from the colors
+        ref_image = ref_image.convert("RGB")
+
+    if kind == VALUE:
+        pixels, _ = image_to_unit_array(ref_image)
+        # A gray image has a single channel, which is already its value
+        return pixels if pixels.ndim == 2 else pixels.max(axis=-1)
+    target_ref, _, _ = extract_target_channel(ref_image, as_grayscale=kind == LUMA)
+    return target_ref
 
 
 def apply_histogram_match(base_image: Image.Image, ref_image: Image.Image) -> Image.Image:
-    """Matches the histogram of the base image to the reference image, natively handling HSV/YCbCr."""
+    """Matches the histogram of the base image to the reference image, natively handling LAB/HSV/YCbCr."""
     mode = base_image.mode
     
-    # 1. Native Branch: Process HSV and YCbCr directly without LAB conversion
-    if mode in ("LAB", "HSV", "YCbCr"):
+    # 1. Native Branch: Process LAB, HSV and YCbCr directly, without leaving their color space
+    if mode in NATIVE_INTENSITY:
         float_base = img_as_float(np.array(base_image))
         
         # Luminance (L) is index 0 in LAB. Value (V) is index 2 in HSV. Luma (Y) is index 0 in YCbCr.
-        target_idx = 0 if (mode == "LAB" or mode == "YCbCr") else 2
+        kind, target_idx = NATIVE_INTENSITY[mode]
         target_base = float_base[..., target_idx]
 
-        if ref_image.mode not in ("LAB", "HSV", "YCbCr"):
-            # We only need the intensity distribution from the reference image, 
-            # so we extract it as a 2D grayscale array regardless of its original mode.
-            target_ref, _, _ = extract_target_channel(ref_image, as_grayscale=True)
-        else:
-            target_ref = _native_intensity(ref_image)
+        # The reference is measured with the same intensity as the base channel
+        target_ref = reference_intensity(ref_image, kind)
         
         # Apply the matching algorithm
         float_base[..., target_idx] = exposure.match_histograms(target_base, target_ref)
@@ -61,14 +76,10 @@ def apply_histogram_match(base_image: Image.Image, ref_image: Image.Image) -> Im
     is_high_depth = mode in ("I", "F") or mode.startswith("I;16")
     is_grayscale = mode in ("L", "LA", "1") or is_high_depth
     
-    # Extract channels for both images using the shared utility
+    # Extract the base channel using the shared utility: gray for a grayscale
+    # image, L* for a color one. The reference is measured the same way
     target_base, lab_base, alpha_base = extract_target_channel(base_image, as_grayscale=is_grayscale)
-    if ref_image.mode not in ("LAB", "HSV", "YCbCr"):
-        # We only need the intensity distribution from the reference image, 
-        # so we extract it as a 2D grayscale array regardless of its original mode.
-        target_ref, _, _ = extract_target_channel(ref_image, as_grayscale=is_grayscale)
-    else:
-        target_ref = _native_intensity(ref_image)
+    target_ref = reference_intensity(ref_image, LUMA if is_grayscale else LIGHTNESS)
 
     # Apply the matching algorithm
     matched = exposure.match_histograms(target_base, target_ref)
