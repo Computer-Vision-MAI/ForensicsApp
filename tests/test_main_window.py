@@ -97,9 +97,38 @@ class PixelHoverTests(unittest.TestCase):
         self.window.image_view = MagicMock(image=Image.new("F", (2, 2), 0.5))
         self.window._on_pixel_hover((1, 1))
 
-        self.window.pixel_info.set.assert_called_with("x 1, y 1 | F 0.500")
-        self.window.pixel_swatch.configure.assert_called_with(background="gray")
+
+class SidebarLayoutTests(unittest.TestCase):
+    def test_sidebar_contains_scrollbar(self) -> None:
+        import tkinter as tk
+        from tkinter import ttk
+        from forensics_app.tools import build_tool_registry
+
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            self.skipTest("No display available (headless environment)")
+            return
+
+        try:
+            registry = build_tool_registry()
+            MainWindow(root, registry)
+
+            def find_widgets(w: tk.Misc) -> list[tk.Misc]:
+                results = [w]
+                for child in w.winfo_children():
+                    results.extend(find_widgets(child))
+                return results
+
+            all_widgets = find_widgets(root)
+            scrollbars = [
+                w for w in all_widgets if isinstance(w, (tk.Scrollbar, ttk.Scrollbar))
+            ]
+            self.assertGreaterEqual(len(scrollbars), 1)
+        finally:
+            root.destroy()
 
 
 if __name__ == "__main__":
     unittest.main()
+

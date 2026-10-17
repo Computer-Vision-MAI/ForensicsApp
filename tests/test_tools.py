@@ -3,6 +3,7 @@ import unittest
 from PIL import Image
 
 from forensics_app.core import ImageDocument
+from forensics_app.tools import build_tool_registry
 from forensics_app.tools.grayscale import GrayscaleTool
 from forensics_app.tools.registry import ToolRegistry
 
@@ -19,6 +20,12 @@ class ToolTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ToolRegistry([GrayscaleTool(), GrayscaleTool()])
 
+    def test_build_tool_registry_contains_template_matching(self) -> None:
+        registry = build_tool_registry()
+        tool_ids = [tool.tool_id for tool in registry.all()]
+        self.assertIn("template_matching", tool_ids)
+
 
 if __name__ == "__main__":
     unittest.main()
+
