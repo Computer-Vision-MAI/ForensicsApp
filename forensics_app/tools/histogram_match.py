@@ -11,12 +11,9 @@ from skimage import exposure, color, img_as_float, img_as_ubyte
 
 from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
+from .dialogs import OPEN_TYPES, load_image_file
 from .image_utils import extract_target_channel, image_to_unit_array
 
-OPEN_TYPES = [
-    ("Image files", "*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp"),
-    ("All files", "*.*"),
-]
 
 # The three ways of measuring how bright a pixel is. They give different numbers
 # for the same color, so the base and the reference must always use the same one
@@ -143,17 +140,4 @@ class HistogramMatchTool(ForensicsTool):
 
     def load_reference_image(self, parent: tk.Misc, title: str) -> tuple[Path, Image.Image] | None:
         """Open a dialog to load the reference image without quantizing or resizing it."""
-        filename = filedialog.askopenfilename(title=title, filetypes=OPEN_TYPES, parent=parent)
-        if not filename:
-            return None
-        
-        try:
-            source = Path(filename)
-            with Image.open(source) as image:
-                # Copy into memory so the file lock is released immediately
-                loaded = image.copy() 
-            return source, loaded
-    
-        except (OSError, UnidentifiedImageError) as error:
-            messagebox.showerror("Could not open image", str(error), parent=parent)
-            return None
+        return load_image_file(parent, title=title)

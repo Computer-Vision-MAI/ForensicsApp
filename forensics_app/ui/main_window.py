@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -86,7 +87,7 @@ class MainWindow:
         body = ttk.Panedwindow(container, orient="horizontal")
         body.pack(fill="both", expand=True)
 
-        sidebar = ttk.Frame(body, style="Sidebar.TFrame", width=250)
+        sidebar = ttk.Frame(body, style="Sidebar.TFrame", width=270)
         sidebar.pack_propagate(False)
         body.add(sidebar, weight=0)
 
@@ -127,7 +128,12 @@ class MainWindow:
             elif event.num == 5:
                 canvas.yview_scroll(1, "units")
             elif event.delta:
-                units = -1 if event.delta > 0 else 1
+                if sys.platform == "darwin":
+                    units = int(-1 * event.delta)
+                else:
+                    units = int(-1 * (event.delta / 120))
+                if units == 0:
+                    units = -1 if event.delta > 0 else 1
                 canvas.yview_scroll(units, "units")
 
         def _bind_scroll(widget: tk.Misc) -> None:

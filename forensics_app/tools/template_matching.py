@@ -9,13 +9,9 @@ from skimage import feature, img_as_float, transform
 
 from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
-from .dialogs import ask_choice
+from .dialogs import OPEN_TYPES, ask_choice, load_image_file
 from .image_utils import is_grayscale, normalize_high_depth_image
 
-OPEN_TYPES = [
-    ("Image files", "*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp"),
-    ("All files", "*.*"),
-]
 
 RESIZE_OPTIONS = (
     "No resizing (keep template as-is)",
@@ -96,9 +92,20 @@ def resize_template(
 
 def rotate_template_array(template_arr: np.ndarray, angle: float) -> np.ndarray:
     """Rotate template array anticlockwise by angle in degrees."""
-    if angle % 360.0 == 0.0:
+    normalized_angle = angle % 360.0
+    if np.isclose(normalized_angle, 0.0) or np.isclose(normalized_angle, 360.0):
         return template_arr
-    return transform.rotate(template_arr, angle, resize=False)
+
+    # Exact quarter-turn rotation for multiples of 90 degrees
+    rem = normalized_angle % 90.0
+    if np.isclose(rem, 0.0) or np.isclose(rem, 90.0):
+        k = int(round(normalized_angle / 90.0)) % 4
+        if k == 0:
+            return template_arr
+        return np.ascontiguousarray(np.rot90(template_arr, k=k, axes=(0, 1)))
+
+    # For other angles, resize canvas so rotation preserves template content
+    return transform.rotate(template_arr, angle, resize=True)
 
 
 def render_template_result(
@@ -117,7 +124,8 @@ def render_template_result(
         gray_255 = (normalize_high_depth_image(image) * 255.0).astype(np.float32)
         rgb_arr = np.stack([gray_255] * 3, axis=-1)
     else:
-        rgb_arr = np.array(image.convert("RGB"), dtype=np.float32)
+        rgb_source = image.convert("LA") if mode == "La" else image
+        rgb_arr = np.array(rgb_source.convert("RGB"), dtype=np.float32)
 
     red_color = np.array([255.0, 0.0, 0.0], dtype=np.float32)
     rgb_arr[matches] = rgb_arr[matches] * (1.0 - alpha) + red_color * alpha
@@ -153,6 +161,13 @@ def apply_template_matching(
 
     # 3. Rotate template array
     tmpl_arr = rotate_template_array(tmpl_arr, rotation)
+
+    rot_tmpl_h, rot_tmpl_w = tmpl_arr.shape[:2]
+    if rot_tmpl_w > base_w or rot_tmpl_h > base_h:
+        raise ValueError(
+            f"Template dimensions ({rot_tmpl_w}x{rot_tmpl_h}) cannot exceed "
+            f"image dimensions ({base_w}x{base_h})."
+        )
 
     # 4. Normalized cross-correlation
     corr = feature.match_template(img_arr, tmpl_arr, pad_input=True)
@@ -333,17 +348,4 @@ class TemplateMatchingTool(ForensicsTool):
         self, parent: tk.Misc, title: str = "Open template image"
     ) -> tuple[Path, Image.Image] | None:
         """Open a dialog to load a template image and return it."""
-        filename = filedialog.askopenfilename(
-            title=title, filetypes=OPEN_TYPES, parent=parent
-        )
-        if not filename:
-            return None
-
-        try:
-            source = Path(filename)
-            with Image.open(source) as image:
-                loaded = image.copy()
-            return source, loaded
-        except (OSError, UnidentifiedImageError) as error:
-            messagebox.showerror("Could not open image", str(error), parent=parent)
-            return None
+        return load_image_file(parent, title=title)

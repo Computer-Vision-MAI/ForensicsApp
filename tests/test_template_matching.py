@@ -326,6 +326,48 @@ class TemplateMatchingFunctionTests(unittest.TestCase):
         arr_0 = np.array(mask_0)
         self.assertFalse(np.any(arr_0 == 255))
 
+    def test_rectangular_template_match_with_rotation_90(self) -> None:
+        # Create a 40x40 base image and an asymmetric rectangular patch (height=12, width=6)
+        base = np.zeros((40, 40), dtype=np.float32)
+        patch = np.zeros((12, 6), dtype=np.float32)
+        for y in range(12):
+            for x in range(6):
+                patch[y, x] = 0.2 + 0.05 * y + 0.08 * x
+
+        # Rotate patch by 90 degrees anticlockwise -> shape becomes (6, 12)
+        patch_rot90 = rotate_template_array(patch, 90.0)
+        self.assertEqual(patch_rot90.shape, (6, 12))
+
+        # Place rotated patch into base image at [15..21, 15..27]
+        base[15:21, 15:27] = patch_rot90
+
+        img_pil = Image.fromarray((base * 255).astype(np.uint8), mode="L")
+        tmpl_pil = Image.fromarray((patch * 255).astype(np.uint8), mode="L")
+
+        # Matching with 90 degrees rotation should match
+        mask_90 = apply_template_matching(
+            image=img_pil,
+            template=tmpl_pil,
+            size=None,
+            rotation=90.0,
+            threshold=0.9,
+            superimpose=False,
+        )
+        arr_90 = np.array(mask_90)
+        self.assertTrue(np.any(arr_90 == 255))
+
+    def test_rotated_template_dimensions_cannot_exceed_image(self) -> None:
+        # Image is 10 wide by 20 high; template is 8 wide by 15 high
+        img = Image.new("L", (10, 20))
+        tmpl = Image.new("L", (8, 15))
+
+        # Before rotation (8x15) fits in (10x20).
+        # When rotated 90 degrees, dimensions become 15 wide by 8 high.
+        # Rotated width (15) exceeds image width (10).
+        with self.assertRaises(ValueError) as ctx:
+            apply_template_matching(img, tmpl, rotation=90.0)
+        self.assertIn("cannot exceed", str(ctx.exception))
+
     def test_superimposed_overlay_ponderated_colors(self) -> None:
         overlay = apply_template_matching(
             image=self.base_rgb,
@@ -509,6 +551,104 @@ class TemplateMatchingFunctionTests(unittest.TestCase):
         )
         self.assertEqual(mask.mode, "L")
         self.assertEqual(np.array(mask)[15, 15], 255)
+
+    def test_la_and_premultiplied_la_mode_matching(self) -> None:
+        # Create base image in LA mode with a distinct patch at [12..18, 12..18]
+        base_la = Image.new("LA", (30, 30), color=(30, 255))
+        for y in range(12, 18):
+            for x in range(12, 18):
+                val = (x - 12) * 20 + (y - 12) * 15 + 60
+                base_la.putpixel((x, y), (val, 255))
+
+        patch_la = base_la.crop((12, 12, 18, 18))
+
+        # Test LA mode mask and overlay
+        mask_la = apply_template_matching(
+            image=base_la,
+            template=patch_la,
+            size=None,
+            rotation=0.0,
+            threshold=0.9,
+            superimpose=False,
+        )
+        self.assertEqual(mask_la.mode, "L")
+        self.assertEqual(np.array(mask_la)[15, 15], 255)
+
+        overlay_la = apply_template_matching(
+            image=base_la,
+            template=patch_la,
+            size=None,
+            rotation=0.0,
+            threshold=0.9,
+            superimpose=True,
+            alpha=0.6,
+        )
+        self.assertEqual(overlay_la.mode, "RGB")
+        self.assertEqual(overlay_la.size, base_la.size)
+
+        # Test "La" (premultiplied alpha) mode mask and overlay
+        base_la_prem = base_la.convert("La")
+        patch_la_prem = patch_la.convert("La")
+
+        mask_prem = apply_template_matching(
+            image=base_la_prem,
+            template=patch_la_prem,
+            size=None,
+            rotation=0.0,
+            threshold=0.9,
+            superimpose=False,
+        )
+        self.assertEqual(mask_prem.mode, "L")
+        self.assertEqual(np.array(mask_prem)[15, 15], 255)
+
+        overlay_prem = apply_template_matching(
+            image=base_la_prem,
+            template=patch_la_prem,
+            size=None,
+            rotation=0.0,
+            threshold=0.9,
+            superimpose=True,
+            alpha=0.6,
+        )
+        self.assertEqual(overlay_prem.mode, "RGB")
+        self.assertEqual(overlay_prem.size, base_la_prem.size)
+
+    def test_i16_high_depth_image_matching(self) -> None:
+        # Create an 'I;16' 16-bit high-depth image with values 5000..40000
+        img_i16 = Image.new("I;16", (30, 30))
+        for y in range(30):
+            for x in range(30):
+                img_i16.putpixel((x, y), 5000)
+        for y in range(12, 18):
+            for x in range(12, 18):
+                img_i16.putpixel((x, y), 20000 + (x - 12) * 2000 + (y - 12) * 1000)
+
+        tmpl_i16 = img_i16.crop((12, 12, 18, 18))
+
+        # Binary mask
+        mask = apply_template_matching(
+            image=img_i16,
+            template=tmpl_i16,
+            size=None,
+            rotation=0.0,
+            threshold=0.9,
+            superimpose=False,
+        )
+        self.assertEqual(mask.mode, "L")
+        self.assertEqual(np.array(mask)[15, 15], 255)
+
+        # Superimposed overlay
+        overlay = apply_template_matching(
+            image=img_i16,
+            template=tmpl_i16,
+            size=None,
+            rotation=0.0,
+            threshold=0.9,
+            superimpose=True,
+            alpha=0.6,
+        )
+        self.assertEqual(overlay.mode, "RGB")
+        self.assertEqual(overlay.size, img_i16.size)
 
 
 if __name__ == "__main__":

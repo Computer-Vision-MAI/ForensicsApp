@@ -106,13 +106,15 @@ class SidebarLayoutTests(unittest.TestCase):
 
         try:
             root = tk.Tk()
+            root.withdraw()
         except tk.TclError:
             self.skipTest("No display available (headless environment)")
             return
 
         try:
             registry = build_tool_registry()
-            MainWindow(root, registry)
+            window = MainWindow(root, registry)
+            root.update_idletasks()
 
             def find_widgets(w: tk.Misc) -> list[tk.Misc]:
                 results = [w]
@@ -125,6 +127,33 @@ class SidebarLayoutTests(unittest.TestCase):
                 w for w in all_widgets if isinstance(w, (tk.Scrollbar, ttk.Scrollbar))
             ]
             self.assertGreaterEqual(len(scrollbars), 1)
+
+            sidebar_canvases = [
+                w for w in all_widgets
+                if isinstance(w, tk.Canvas) and w is not window.image_view.canvas
+            ]
+            self.assertEqual(len(sidebar_canvases), 1)
+            canvas = sidebar_canvases[0]
+            scrollbar = scrollbars[0]
+
+            # Verify sidebar Canvas has a non-empty scrollregion
+            scrollregion = canvas.cget("scrollregion")
+            self.assertTrue(scrollregion)
+            bbox_parts = [float(v) for v in scrollregion.split()]
+            self.assertEqual(len(bbox_parts), 4)
+            self.assertGreater(bbox_parts[3] - bbox_parts[1], 0)
+
+            # Verify yscrollcommand is connected to the sidebar scrollbar
+            yscrollcommand = canvas.cget("yscrollcommand")
+            self.assertTrue(yscrollcommand)
+            self.assertTrue(str(scrollbar) in yscrollcommand or "set" in yscrollcommand)
+
+            # Verify synthetic wheel event changes canvas.yview() when content exceeds canvas
+            yview_initial = canvas.yview()
+            if yview_initial[1] < 1.0:
+                canvas.event_generate("<MouseWheel>", delta=-120)
+                yview_scrolled = canvas.yview()
+                self.assertNotEqual(yview_initial, yview_scrolled)
         finally:
             root.destroy()
 
