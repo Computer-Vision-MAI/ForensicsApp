@@ -17,6 +17,8 @@ from .convolution import ConvolutionTool
 from .filters import FiltersTool
 from .sharpen import SharpenTool
 from .template_matching import TemplateMatchingTool
+from .hog import HogTool
+from .person_detection import PersonDetectionTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -36,6 +38,8 @@ def build_tool_registry() -> ToolRegistry:
             FiltersTool(),
             SharpenTool(),
             TemplateMatchingTool(),
+            HogTool(),
+            PersonDetectionTool(),
         ]
     )
 
