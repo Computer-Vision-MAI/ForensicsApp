@@ -2,8 +2,40 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
+
+from PIL import Image, UnidentifiedImageError
+
+OPEN_TYPES = [
+    ("Image files", "*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp"),
+    ("All files", "*.*"),
+]
+
+
+def load_image_file(
+    parent: tk.Misc,
+    title: str = "Open image",
+    filetypes: list[tuple[str, str]] | tuple[tuple[str, str], ...] | None = None,
+) -> tuple[Path, Image.Image] | None:
+    """Open a file dialog to load an image, returning its Path and a copy of the Image."""
+    filename = filedialog.askopenfilename(
+        title=title,
+        filetypes=filetypes if filetypes is not None else OPEN_TYPES,
+        parent=parent,
+    )
+    if not filename:
+        return None
+
+    try:
+        source = Path(filename)
+        with Image.open(source) as image:
+            loaded = image.copy()
+        return source, loaded
+    except (OSError, UnidentifiedImageError) as error:
+        messagebox.showerror("Could not open image", str(error), parent=parent)
+        return None
 
 
 class ChoiceDialog(simpledialog.Dialog):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
@@ -86,17 +87,73 @@ class MainWindow:
         body = ttk.Panedwindow(container, orient="horizontal")
         body.pack(fill="both", expand=True)
 
-        sidebar = ttk.Frame(body, style="Sidebar.TFrame", padding=12, width=235)
+        sidebar = ttk.Frame(body, style="Sidebar.TFrame", width=270)
         sidebar.pack_propagate(False)
         body.add(sidebar, weight=0)
-        ttk.Label(sidebar, text="Forensics tools", style="Title.TLabel", background="#eef1f5").pack(
-            anchor="w", pady=(0, 12)
+
+        title_label = ttk.Label(sidebar, text="Forensics tools", style="Title.TLabel", background="#eef1f5")
+        title_label.pack(anchor="w", padx=12, pady=(12, 8))
+
+        scroll_container = ttk.Frame(sidebar, style="Sidebar.TFrame")
+        scroll_container.pack(fill="both", expand=True)
+
+        scrollbar = ttk.Scrollbar(scroll_container, orient="vertical")
+        scrollbar.pack(side="right", fill="y")
+
+        canvas = tk.Canvas(
+            scroll_container,
+            background="#eef1f5",
+            highlightthickness=0,
+            borderwidth=0,
+            yscrollcommand=scrollbar.set,
         )
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.configure(command=canvas.yview)
+
+        content = ttk.Frame(canvas, style="Sidebar.TFrame", padding=(12, 0, 4, 12))
+        canvas_window = canvas.create_window((0, 0), window=content, anchor="nw")
+
+        content.bind(
+            "<Configure>",
+            lambda _event: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+        canvas.bind(
+            "<Configure>",
+            lambda event: canvas.itemconfig(canvas_window, width=event.width),
+        )
+
+        def _on_mousewheel(event: tk.Event) -> None:
+            if event.num == 4:
+                canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                canvas.yview_scroll(1, "units")
+            elif event.delta:
+                if sys.platform == "darwin":
+                    units = int(-1 * event.delta)
+                else:
+                    units = int(-1 * (event.delta / 120))
+                if units == 0:
+                    units = -1 if event.delta > 0 else 1
+                canvas.yview_scroll(units, "units")
+
+        def _bind_scroll(widget: tk.Misc) -> None:
+            widget.bind("<MouseWheel>", _on_mousewheel, add="+")
+            widget.bind("<Button-4>", _on_mousewheel, add="+")
+            widget.bind("<Button-5>", _on_mousewheel, add="+")
+
+        _bind_scroll(sidebar)
+        _bind_scroll(scroll_container)
+        _bind_scroll(canvas)
+        _bind_scroll(content)
+        _bind_scroll(title_label)
+
         for category, tools in self.registry.categories():
-            ttk.Label(sidebar, text=category, style="Category.TLabel").pack(anchor="w", pady=(9, 4))
+            cat_label = ttk.Label(content, text=category, style="Category.TLabel")
+            cat_label.pack(anchor="w", pady=(9, 4))
+            _bind_scroll(cat_label)
             for tool in tools:
                 button = ttk.Button(
-                    sidebar,
+                    content,
                     text=tool.title,
                     style="Tool.TButton",
                     command=lambda selected=tool: self.run_tool(selected),
@@ -104,6 +161,8 @@ class MainWindow:
                 button.pack(fill="x", pady=2)
                 button.bind("<Enter>", lambda _event, selected=tool: self.status.set(selected.description))
                 button.bind("<Leave>", lambda _event: self.status.set("Ready."))
+                _bind_scroll(button)
+
 
         self.image_view = ImageView(body, on_hover=self._on_pixel_hover)
         body.add(self.image_view, weight=1)

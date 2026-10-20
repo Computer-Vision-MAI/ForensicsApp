@@ -16,6 +16,7 @@ from .canny_edge import CannyEdgeTool
 from .convolution import ConvolutionTool
 from .filters import FiltersTool
 from .sharpen import SharpenTool
+from .template_matching import TemplateMatchingTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -34,8 +35,9 @@ def build_tool_registry() -> ToolRegistry:
             ConvolutionTool(),
             FiltersTool(),
             SharpenTool(),
+            TemplateMatchingTool(),
         ]
     )
 
 
-__all__ = ["ToolRegistry", "build_tool_registry"]
+__all__ = ["ToolRegistry", "build_tool_registry", "TemplateMatchingTool"]

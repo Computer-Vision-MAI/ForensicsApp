@@ -12,11 +12,8 @@ from PIL import UnidentifiedImageError
 
 from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
+from .dialogs import OPEN_TYPES, load_image_file
 
-OPEN_TYPES = [
-    ("Image files", "*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp"),
-    ("All files", "*.*"),
-]
 
 def apply_mask(base_image: Image.Image, mask_img: Image.Image, texture_img: Image.Image | None) -> Image.Image:
     """Apply the mask (and optional texture) using a boolean array."""
@@ -128,22 +125,16 @@ class MaskTool(ForensicsTool):
 
     def load_image(self, parent: tk.Misc, title: str, base_image: Image.Image | None = None) -> tuple[Path, Image.Image] | None:
         """Open a dialog to load a generic image and return it."""
-        filename = filedialog.askopenfilename(title=title, filetypes=OPEN_TYPES, parent=parent)
-        if not filename:
+        result = load_image_file(parent, title=title)
+        if result is None:
             return None
-        
-        try:
-            source = Path(filename)
-            with Image.open(source) as image:
-                loaded = image.copy()
-                if base_image is not None:
-                    # Convert mapping to the base image's palette if P mode is used
-                    if base_image.mode == "P":
-                        loaded = loaded.convert("RGB").quantize(palette=base_image)
-                    else:
-                        loaded = loaded.convert(base_image.mode)
-            return source, loaded
-    
-        except (OSError, UnidentifiedImageError) as error:
-            messagebox.showerror("Could not open image", str(error), parent=parent)
-            return None
+
+        source, loaded = result
+        if base_image is not None:
+            # Convert mapping to the base image's palette if P mode is used
+            if base_image.mode == "P":
+                loaded = loaded.convert("RGB").quantize(palette=base_image)
+            else:
+                loaded = loaded.convert(base_image.mode)
+        return source, loaded
+

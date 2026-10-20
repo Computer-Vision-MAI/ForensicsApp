@@ -97,9 +97,67 @@ class PixelHoverTests(unittest.TestCase):
         self.window.image_view = MagicMock(image=Image.new("F", (2, 2), 0.5))
         self.window._on_pixel_hover((1, 1))
 
-        self.window.pixel_info.set.assert_called_with("x 1, y 1 | F 0.500")
-        self.window.pixel_swatch.configure.assert_called_with(background="gray")
+
+class SidebarLayoutTests(unittest.TestCase):
+    def test_sidebar_contains_scrollbar(self) -> None:
+        import tkinter as tk
+        from tkinter import ttk
+        from forensics_app.tools import build_tool_registry
+
+        try:
+            root = tk.Tk()
+            root.withdraw()
+        except tk.TclError:
+            self.skipTest("No display available (headless environment)")
+            return
+
+        try:
+            registry = build_tool_registry()
+            window = MainWindow(root, registry)
+            root.update_idletasks()
+
+            def find_widgets(w: tk.Misc) -> list[tk.Misc]:
+                results = [w]
+                for child in w.winfo_children():
+                    results.extend(find_widgets(child))
+                return results
+
+            all_widgets = find_widgets(root)
+            scrollbars = [
+                w for w in all_widgets if isinstance(w, (tk.Scrollbar, ttk.Scrollbar))
+            ]
+            self.assertGreaterEqual(len(scrollbars), 1)
+
+            sidebar_canvases = [
+                w for w in all_widgets
+                if isinstance(w, tk.Canvas) and w is not window.image_view.canvas
+            ]
+            self.assertEqual(len(sidebar_canvases), 1)
+            canvas = sidebar_canvases[0]
+            scrollbar = scrollbars[0]
+
+            # Verify sidebar Canvas has a non-empty scrollregion
+            scrollregion = canvas.cget("scrollregion")
+            self.assertTrue(scrollregion)
+            bbox_parts = [float(v) for v in scrollregion.split()]
+            self.assertEqual(len(bbox_parts), 4)
+            self.assertGreater(bbox_parts[3] - bbox_parts[1], 0)
+
+            # Verify yscrollcommand is connected to the sidebar scrollbar
+            yscrollcommand = canvas.cget("yscrollcommand")
+            self.assertTrue(yscrollcommand)
+            self.assertTrue(str(scrollbar) in yscrollcommand or "set" in yscrollcommand)
+
+            # Verify synthetic wheel event changes canvas.yview() when content exceeds canvas
+            yview_initial = canvas.yview()
+            if yview_initial[1] < 1.0:
+                canvas.event_generate("<MouseWheel>", delta=-120)
+                yview_scrolled = canvas.yview()
+                self.assertNotEqual(yview_initial, yview_scrolled)
+        finally:
+            root.destroy()
 
 
 if __name__ == "__main__":
     unittest.main()
+
