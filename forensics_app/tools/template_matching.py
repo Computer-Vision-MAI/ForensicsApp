@@ -1,7 +1,7 @@
 from __future__ import annotations
 from pathlib import Path
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog
+from tkinter import messagebox, simpledialog
 
 import numpy as np
 from PIL import Image, UnidentifiedImageError
@@ -10,7 +10,7 @@ from skimage import feature, img_as_float, transform
 from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
 from .dialogs import OPEN_TYPES, ask_choice, load_image_file
-from .image_utils import is_grayscale, normalize_high_depth_image
+from .image_utils import is_grayscale, normalize_high_depth_image, render_mask_overlay, to_grayscale_array
 
 
 RESIZE_OPTIONS = (
@@ -19,17 +19,8 @@ RESIZE_OPTIONS = (
     "Resize (fixed height and width in pixels)",
 )
 
-
-def to_unit_gray_array(img: Image.Image) -> np.ndarray:
-    """Convert any image mode to a 2D float array in [0, 1] without clipping."""
-    mode = img.mode
-    is_high_depth = mode in ("I", "F") or mode.startswith("I;16")
-    if is_high_depth:
-        return normalize_high_depth_image(img)
-    if mode in ("LA", "La"):
-        arr = np.array(img.convert("LA"))
-        return img_as_float(arr[..., 0])
-    return img_as_float(np.array(img.convert("L")))
+# Re-export to_grayscale_array for backwards compatibility and test imports
+to_unit_gray_array = to_grayscale_array
 
 
 def to_unit_color_array(img: Image.Image) -> np.ndarray:
@@ -115,21 +106,7 @@ def render_template_result(
     alpha: float,
 ) -> Image.Image:
     """Render matches as either a binary mask or a red superimposed overlay."""
-    if not superimpose:
-        return Image.fromarray((matches * 255).astype(np.uint8))
-
-    mode = image.mode
-    is_high_depth = mode in ("I", "F") or mode.startswith("I;16")
-    if is_high_depth:
-        gray_255 = (normalize_high_depth_image(image) * 255.0).astype(np.float32)
-        rgb_arr = np.stack([gray_255] * 3, axis=-1)
-    else:
-        rgb_source = image.convert("LA") if mode == "La" else image
-        rgb_arr = np.array(rgb_source.convert("RGB"), dtype=np.float32)
-
-    red_color = np.array([255.0, 0.0, 0.0], dtype=np.float32)
-    rgb_arr[matches] = rgb_arr[matches] * (1.0 - alpha) + red_color * alpha
-    return Image.fromarray(np.clip(rgb_arr, 0.0, 255.0).astype(np.uint8))
+    return render_mask_overlay(image, matches, superimpose=superimpose, alpha=alpha)
 
 
 def apply_template_matching(
