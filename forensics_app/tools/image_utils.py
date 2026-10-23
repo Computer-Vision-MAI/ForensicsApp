@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Callable
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 from skimage import color, img_as_float
 
 from forensics_app.core.channels import ALPHA, MODE_CHANNELS, NUMERIC_MODES
@@ -151,3 +151,193 @@ def per_channel(function: Callable[[np.ndarray], np.ndarray], pixels: np.ndarray
     #   lambda channel: filters.gaussian(channel, sigma=2)
     # means "given a channel, blur it with sigma 2"
     return np.dstack([function(pixels[..., index]) for index in range(pixels.shape[-1])])
+
+
+def to_grayscale_array(img: Image.Image) -> np.ndarray:
+    """Safely convert any PIL Image mode to a 2D float64 numpy array in [0, 1].
+
+    Supports standard modes (RGB, RGBA, L, 1, P, CMYK, etc.) and high-depth modes
+    (I, F, I;16) as well as tricky formats like 'La'.
+    """
+    mode = img.mode
+    is_high_depth = mode in ("I", "F") or mode.startswith("I;16")
+    if is_high_depth:
+        return normalize_high_depth_image(img).astype(np.float64)
+    if mode == "La":
+        conv = img.convert("LA")
+    elif mode == "RGBa":
+        conv = img.convert("RGBA")
+    else:
+        conv = img
+    return np.array(conv.convert("L"), dtype=np.float64) / 255.0
+
+
+def render_mask_overlay(
+    img: Image.Image,
+    mask: np.ndarray,
+    superimpose: bool = False,
+    alpha: float = 0.6,
+) -> Image.Image:
+    """Render a 2D boolean mask onto an image as a binary mask or superimposed red overlay.
+
+    Args:
+        img: Input PIL Image in any mode.
+        mask: Boolean 2D ndarray of shape (H, W).
+        superimpose: If True, overlay True pixels in red with alpha blending.
+                     If False, return a binary mask (mode 'L') with 255 for True and 0 for False.
+        alpha: Blending weight in [0, 1] for superimposition (1.0 = solid red).
+
+    Returns:
+        A PIL Image in mode 'L' if superimpose is False, or mode 'RGB' if superimpose is True.
+    """
+    if alpha < 0.0 or alpha > 1.0 or np.isnan(alpha):
+        raise ValueError("Alpha must be between 0.0 and 1.0.")
+
+    if not superimpose:
+        return Image.fromarray((mask * 255).astype(np.uint8))
+
+    mode = img.mode
+    is_high_depth = mode in ("I", "F") or mode.startswith("I;16")
+    conv = img
+    # Extract original alpha channel if present
+    if mode == "La":
+        conv = img.convert("LA")
+    elif mode == "RGBa":
+        conv = img.convert("RGBA")
+    alpha_arr = None
+    if "A" in conv.getbands():
+        alpha_arr = np.array(conv.getchannel("A"), dtype=np.uint8)
+    elif "transparency" in conv.info:
+        rgba = conv.convert("RGBA")
+        alpha_arr = np.array(rgba.getchannel("A"), dtype=np.uint8)
+
+    if is_high_depth:
+        gray_arr = (normalize_high_depth_image(img) * 255.0).astype(np.float32)
+        rgb_arr = np.stack((gray_arr,) * 3, axis=-1)
+    else:
+        rgb_arr = np.array(conv.convert("RGB"), dtype=np.float32)
+
+    edge_color = np.array([255, 0, 0], dtype=np.float32)
+    rgb_arr[mask] = rgb_arr[mask] * (1.0 - alpha) + edge_color * alpha
+    rgb_u8 = np.clip(rgb_arr, 0, 255).astype(np.uint8)
+
+    if alpha_arr is not None:
+        if alpha > 0.0:
+            alpha_arr[mask] = np.maximum(alpha_arr[mask], 255)
+        rgba_arr = np.dstack((rgb_u8, alpha_arr))
+        return Image.fromarray(rgba_arr, mode="RGBA")
+    return Image.fromarray(rgb_u8, mode="RGB")
+
+
+def render_feature_overlay(
+    img: Image.Image,
+    coords: np.ndarray | None,
+    superimpose: bool = False,
+    alpha: float = 0.6,
+    marker_radius: int = 0,
+) -> Image.Image:
+    """Render coordinates onto an image as a binary mask or superimposed red overlay.
+
+    Args:
+        img: Input PIL Image in any mode.
+        coords: (N, 2) array of (row, col) coordinates, or None.
+        superimpose: If True, overlay points in red over the original image with alpha blending.
+                     If False, return a binary mask (mode 'L') with points as 255 on a black background.
+        alpha: Blending weight in [0, 1] for superimposition (1.0 = solid red).
+        marker_radius: Radius in pixels around each coordinate. 0 means a single pixel.
+
+    Returns:
+        A PIL Image in mode 'L' if superimpose is False, or mode 'RGB' if superimpose is True.
+    """
+    w, h = img.size
+    mask = np.zeros((h, w), dtype=bool)
+
+    if coords is not None and len(coords) > 0:
+        r_coords = np.clip(np.round(coords[:, 0]).astype(int), 0, h - 1)
+        c_coords = np.clip(np.round(coords[:, 1]).astype(int), 0, w - 1)
+        if marker_radius <= 0:
+            mask[r_coords, c_coords] = True
+        else:
+            for r, c in zip(r_coords, c_coords):
+                r_min = max(0, r - marker_radius)
+                r_max = min(h, r + marker_radius + 1)
+                c_min = max(0, c - marker_radius)
+                c_max = min(w, c + marker_radius + 1)
+                for rr in range(r_min, r_max):
+                    for cc in range(c_min, c_max):
+                        if (rr - r) ** 2 + (cc - c) ** 2 <= marker_radius ** 2:
+                            mask[rr, cc] = True
+
+    return render_mask_overlay(img, mask, superimpose=superimpose, alpha=alpha)
+
+
+def render_keypoint_overlay(
+    img: Image.Image,
+    coords: np.ndarray | None,
+    scales: np.ndarray | None = None,
+    orientations: np.ndarray | None = None,
+    superimpose: bool = False,
+    alpha: float = 0.6,
+    base_radius: float = 3.0,
+    draw_orientation: bool = True,
+) -> Image.Image:
+    """Render keypoints with circumference circles and orientation rays.
+
+    Draws each keypoint with a circular ring (circumference) proportional to its scale,
+    a center dot, and an orientation ray pointing in the direction of the dominant gradient.
+
+    Args:
+        img: Input PIL Image in any mode.
+        coords: (N, 2) array of (row, col) coordinates.
+        scales: (N,) array of scale values in pixels, or None.
+        orientations: (N,) array of angles in radians, or None.
+        superimpose: If True, overlay in red over the original image with alpha blending.
+                     If False, return a binary mask (mode 'L') with features as 255 on 0.
+        alpha: Blending weight in [0, 1] when superimpose is True.
+        base_radius: Baseline / minimum radius in pixels for each circle.
+        draw_orientation: Whether to draw the orientation ray from center to circumference.
+
+    Returns:
+        PIL Image in mode 'L' if superimpose is False, or mode 'RGB' if superimpose is True.
+    """
+    w, h = img.size
+    mask_im = Image.new("L", (w, h), 0)
+    draw = ImageDraw.Draw(mask_im)
+
+    if coords is not None and len(coords) > 0:
+        for idx in range(len(coords)):
+            r, c = coords[idx]
+            if np.isnan(r) or np.isnan(c):
+                continue
+            x, y = float(c), float(r)
+            if not (0 <= x < w and 0 <= y < h):
+                continue
+
+            # Determine circle radius
+            if scales is not None and idx < len(scales) and not np.isnan(scales[idx]):
+                r_val = float(scales[idx])
+                radius = max(base_radius, r_val)
+            else:
+                radius = base_radius
+
+            # Draw circle (circumference)
+            draw.ellipse(
+                (x - radius, y - radius, x + radius, y + radius),
+                outline=255,
+                width=1,
+            )
+            # Center point
+            draw.point((int(round(x)), int(round(y))), fill=255)
+
+            # Draw orientation ray
+            if draw_orientation and orientations is not None and idx < len(orientations):
+                theta = float(orientations[idx])
+                if not np.isnan(theta):
+                    end_x = x + radius * np.cos(theta)
+                    end_y = y + radius * np.sin(theta)
+                    draw.line([(x, y), (end_x, end_y)], fill=255, width=1)
+
+    mask = np.array(mask_im, dtype=bool)
+    return render_mask_overlay(img, mask, superimpose=superimpose, alpha=alpha)
+
+

@@ -8,7 +8,7 @@ from PIL import Image
 from forensics_app.core import ImageDocument
 from forensics_app.tools.grayscale import GrayscaleTool
 from forensics_app.tools.histogram import HistogramTool
-from forensics_app.ui.main_window import MainWindow
+from forensics_app.ui.main_window import MainWindow, _mousewheel_units
 
 
 class MainWindowToolTests(unittest.TestCase):
@@ -97,6 +97,22 @@ class PixelHoverTests(unittest.TestCase):
         self.window.image_view = MagicMock(image=Image.new("F", (2, 2), 0.5))
         self.window._on_pixel_hover((1, 1))
 
+        self.window.pixel_info.set.assert_called_with("x 1, y 1 | F 0.500")
+        self.window.pixel_swatch.configure.assert_called_with(background="gray")
+
+
+class MouseWheelTests(unittest.TestCase):
+    @patch("forensics_app.ui.main_window.tk.TkVersion", 8.6)
+    @patch("forensics_app.ui.main_window.sys.platform", "darwin")
+    def test_macos_tk_86_uses_raw_delta_units(self) -> None:
+        self.assertEqual(_mousewheel_units(-10), 10)
+
+    @patch("forensics_app.ui.main_window.tk.TkVersion", 8.7)
+    @patch("forensics_app.ui.main_window.sys.platform", "darwin")
+    def test_macos_tk_87_uses_120_delta_scale(self) -> None:
+        self.assertEqual(_mousewheel_units(-120), 1)
+        self.assertEqual(_mousewheel_units(-10), 1)
+
 
 class SidebarLayoutTests(unittest.TestCase):
     def test_sidebar_contains_scrollbar(self) -> None:
@@ -114,6 +130,16 @@ class SidebarLayoutTests(unittest.TestCase):
         try:
             registry = build_tool_registry()
             window = MainWindow(root, registry)
+            # Override minsize set by MainWindow (820x520) and constrain height to guarantee overflow
+            root.minsize(200, 150)
+            # Position off-screen with 0-alpha so it maps widgets without flashing on the user's display
+            root.geometry("800x250+9999+9999")
+            try:
+                root.attributes("-alpha", 0.0)
+            except tk.TclError:
+                pass
+            root.deiconify()
+            root.update()
             root.update_idletasks()
 
             def find_widgets(w: tk.Misc) -> list[tk.Misc]:
@@ -148,16 +174,34 @@ class SidebarLayoutTests(unittest.TestCase):
             self.assertTrue(yscrollcommand)
             self.assertTrue(str(scrollbar) in yscrollcommand or "set" in yscrollcommand)
 
+            # Verify that content height exceeds canvas height (guaranteed overflow)
+            bbox = canvas.bbox("all")
+            self.assertIsNotNone(bbox)
+            content_height = bbox[3] - bbox[1]
+            canvas_height = canvas.winfo_height()
+            self.assertGreater(content_height, canvas_height, "Content height must exceed canvas height")
+
             # Verify synthetic wheel event changes canvas.yview() when content exceeds canvas
             yview_initial = canvas.yview()
-            if yview_initial[1] < 1.0:
-                canvas.event_generate("<MouseWheel>", delta=-120)
-                yview_scrolled = canvas.yview()
-                self.assertNotEqual(yview_initial, yview_scrolled)
+            self.assertLess(yview_initial[1], 1.0, "Content must overflow canvas to test scrolling")
+
+            # Test fine-grained sub-120 delta event (e.g. -60 from trackpad)
+            canvas.event_generate("<MouseWheel>", delta=-60)
+            root.update_idletasks()
+            yview_after_sub120 = canvas.yview()
+            self.assertNotEqual(yview_initial, yview_after_sub120)
+
+            # Test standard 120-notch delta event (reset first to ensure headroom on all platforms)
+            canvas.yview_moveto(0)
+            root.update_idletasks()
+            yview_before_120 = canvas.yview()
+            canvas.event_generate("<MouseWheel>", delta=-120)
+            root.update_idletasks()
+            yview_after_120 = canvas.yview()
+            self.assertNotEqual(yview_before_120, yview_after_120)
         finally:
             root.destroy()
 
 
 if __name__ == "__main__":
     unittest.main()
-
