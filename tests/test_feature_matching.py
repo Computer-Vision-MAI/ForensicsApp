@@ -30,7 +30,18 @@ from forensics_app.tools.matching import (
 from forensics_app.tools.matching_dialog import parse_match_settings
 
 # Same homography as the RANSAC slides: the astronaut's corners moved inwards/outwards
-SLIDE_TRANSFORM = transform.ProjectiveTransform.from_estimate(
+
+
+def estimate_projective(src: np.ndarray, dst: np.ndarray) -> transform.ProjectiveTransform:
+    """Fit a homography with any scikit-image version (from_estimate only exists since 0.26)."""
+    if hasattr(transform.ProjectiveTransform, "from_estimate"):
+        return transform.ProjectiveTransform.from_estimate(src, dst)
+    fitted = transform.ProjectiveTransform()
+    fitted.estimate(src, dst)
+    return fitted
+
+
+SLIDE_TRANSFORM = estimate_projective(
     np.array([[0, 0], [512, 0], [512, 512], [0, 512]]),
     np.array([[50, 50], [500, -50], [500, 500], [-50, 500]]),
 )
