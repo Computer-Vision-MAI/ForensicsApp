@@ -73,8 +73,9 @@ class ListImageFilesTests(FolderTestCase):
         self.assertNotIn("camera.png", names)
 
     def test_missing_folder_raises(self) -> None:
+        missing = self.folder / "nope"
         with self.assertRaises(ValueError):
-            list_image_files(self.folder / "nope")
+            list_image_files(missing)
 
 
 class RankingTests(FolderTestCase):
@@ -113,12 +114,14 @@ class RankingTests(FolderTestCase):
 
     def test_cancelling_stops_the_search(self) -> None:
         reference = detect_features(astronaut(), FAST_ORB)
+        paths = list_image_files(self.folder)
         with self.assertRaises(TaskCancelled):
-            rank_candidates(reference, list_image_files(self.folder), FAST_ORB, cancelled=lambda: True)
+            rank_candidates(reference, paths, FAST_ORB, cancelled=lambda: True)
 
     def test_reference_without_keypoints_raises(self) -> None:
+        blank, paths = Image.new("L", (100, 100)), list_image_files(self.folder)
         with self.assertRaisesRegex(ValueError, "No keypoints"):
-            find_closest_image(Image.new("L", (100, 100)), list_image_files(self.folder), FAST_ORB)
+            find_closest_image(blank, paths, FAST_ORB)
 
     def test_folder_with_only_broken_files_has_no_best(self) -> None:
         lookup = find_closest_image(astronaut(), [self.folder / "broken.png"], FAST_ORB)

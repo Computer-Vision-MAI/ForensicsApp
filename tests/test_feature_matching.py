@@ -164,8 +164,9 @@ class WorkingImageTests(unittest.TestCase):
                 self.assertEqual((work.mode, work.size), ("L", (64, 64)))
 
     def test_empty_image_raises(self) -> None:
+        empty = Image.new("L", (0, 10))
         with self.assertRaises(ValueError):
-            working_image(Image.new("L", (0, 10)), 640)
+            working_image(empty, 640)
 
 
 class DetectAndMatchTests(unittest.TestCase):
@@ -345,22 +346,26 @@ class ApplyFeatureMatchingTests(unittest.TestCase):
 
     def test_warp_outputs_need_ransac(self) -> None:
         settings = MatchSettings(method="orb", use_ransac=False)
+        image = astronaut()
         for output in ("transformed", "aligned"):
             with self.subTest(output=output), self.assertRaisesRegex(ValueError, "needs RANSAC"):
-                apply_feature_matching(astronaut(), astronaut(), settings, output=output)
+                apply_feature_matching(image, image, settings, output=output)
 
     def test_aligned_output_needs_ransac(self) -> None:
         settings = MatchSettings(method="orb", use_ransac=False)
+        image = astronaut()
         with self.assertRaisesRegex(ValueError, "needs RANSAC"):
-            apply_feature_matching(astronaut(), astronaut(), settings, output="aligned")
+            apply_feature_matching(image, image, settings, output="aligned")
 
     def test_aligned_output_fails_clearly_without_a_model(self) -> None:
+        image, blank = astronaut(), Image.new("L", (100, 100))
         with self.assertRaisesRegex(ValueError, "could not find a reliable transform"):
-            apply_feature_matching(astronaut(), Image.new("L", (100, 100)), FAST_ORB, output="aligned")
+            apply_feature_matching(image, blank, FAST_ORB, output="aligned")
 
     def test_unknown_output_is_rejected(self) -> None:
+        image = astronaut()
         with self.assertRaises(ValueError):
-            apply_feature_matching(astronaut(), astronaut(), FAST_ORB, output="gif")
+            apply_feature_matching(image, image, FAST_ORB, output="gif")
 
 
 class RunWithProgressTests(unittest.TestCase):
