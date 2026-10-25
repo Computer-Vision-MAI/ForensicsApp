@@ -15,6 +15,7 @@ number of pixels for every pair.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 import warnings
 
 import numpy as np
@@ -79,7 +80,7 @@ class MatchSettings:
             raise ValueError("The number of ORB keypoints must be at least 1.")
         if self.n_octaves < 1 or self.n_scales < 1:
             raise ValueError("SIFT octaves and scales must be at least 1.")
-        if not self.sigma >= 1.0:
+        if math.isnan(self.sigma) or self.sigma < 1.0:
             raise ValueError("SIFT sigma must be at least 1.0.")
         if self.max_side != 0 and self.max_side < 64:
             raise ValueError("The working size must be 0 (full size) or at least 64 pixels.")
@@ -89,7 +90,7 @@ class MatchSettings:
             raise ValueError(
                 f"RANSAC model must be one of {', '.join(RANSAC_MODELS)} (got '{self.ransac_model}')."
             )
-        if not self.residual_threshold > 0.0:
+        if math.isnan(self.residual_threshold) or self.residual_threshold <= 0.0:
             raise ValueError("The RANSAC residual threshold must be positive.")
         if self.max_trials < 1:
             raise ValueError("RANSAC needs at least 1 trial.")
@@ -295,10 +296,11 @@ def _fit_height(img: Image.Image, height: int) -> tuple[Image.Image, float]:
 
 
 def _load_font(size: int) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
-    try:
-        return ImageFont.load_default(size=size)
-    except TypeError:  # Pillow without FreeType support
-        return ImageFont.load_default()
+    font = ImageFont.load_default()
+    # Pillow >= 10.1 with FreeType gives a scalable font; older ones a fixed bitmap
+    if isinstance(font, ImageFont.FreeTypeFont):
+        return font.font_variant(size=size)
+    return font
 
 
 def render_matches(

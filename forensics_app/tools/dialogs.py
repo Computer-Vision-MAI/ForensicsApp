@@ -155,7 +155,7 @@ def run_with_progress(
     def worker() -> None:
         try:
             outcome["result"] = task(lambda done, total, text: updates.put((done, total, text)), cancel.is_set)
-        except BaseException as error:  # handed back to the Tk thread below
+        except Exception as error:  # handed back to the Tk thread below
             outcome["error"] = error
         finally:
             updates.put(None)

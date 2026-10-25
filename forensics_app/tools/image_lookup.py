@@ -16,7 +16,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image
 
 from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
@@ -125,7 +125,7 @@ def rank_candidates(
             progress(index, len(paths), f"Matching {path.name} ({index + 1}/{len(paths)})…")
         try:
             features = detect_features(load_image(path), settings)
-        except (OSError, UnidentifiedImageError, ValueError) as error:
+        except (OSError, ValueError) as error:  # UnidentifiedImageError is an OSError
             candidates.append(Candidate(path, error=str(error) or type(error).__name__))
             continue
         candidate = Candidate(path, compare_features(reference, features, settings), len(features))
