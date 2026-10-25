@@ -13,6 +13,8 @@ MODEL_LABELS = {"affine": "Affine (3 points)", "projective": "Projective / homog
 
 INT_FIELDS = ("n_keypoints", "n_octaves", "n_scales", "max_side", "max_trials")
 FLOAT_FIELDS = ("sigma", "max_ratio", "residual_threshold")
+TEXT_FIELDS = ("method", "ransac_model")
+FLAG_FIELDS = ("cross_check", "use_ransac")
 FIELD_NAMES = {
     "n_keypoints": "Number of keypoints",
     "n_octaves": "Octaves",
@@ -25,28 +27,32 @@ FIELD_NAMES = {
 }
 
 
+def _parse_number(name: str, value: object) -> int | float:
+    """Turn one form field into a number, with a readable error naming the field."""
+    text = str(value).strip()
+    try:
+        return int(text) if name in INT_FIELDS else float(text)
+    except ValueError:
+        kind = "a whole number" if name in INT_FIELDS else "a number"
+        raise ValueError(f"{FIELD_NAMES[name]} must be {kind} (got '{text}').") from None
+
+
 def parse_match_settings(values: Mapping[str, object]) -> MatchSettings:
     """Build MatchSettings from the raw form values, raising ValueError with a clear message.
 
     Numbers may arrive as text (what an Entry holds); ``method`` and
-    ``ransac_model`` are keys of ``METHODS`` / ``RANSAC_MODELS``.
+    ``ransac_model`` are keys of ``METHODS`` / ``RANSAC_MODELS``. Missing
+    fields keep their default.
     """
+    present = [name for name in values if name in FIELD_NAMES or name in TEXT_FIELDS + FLAG_FIELDS]
     parsed: dict[str, object] = {}
-    for name in INT_FIELDS + FLOAT_FIELDS:
-        if name not in values:
-            continue
-        text = str(values[name]).strip()
-        try:
-            parsed[name] = int(text) if name in INT_FIELDS else float(text)
-        except ValueError:
-            kind = "a whole number" if name in INT_FIELDS else "a number"
-            raise ValueError(f"{FIELD_NAMES[name]} must be {kind} (got '{text}').") from None
-    for name in ("method", "ransac_model"):
-        if name in values:
+    for name in present:
+        if name in TEXT_FIELDS:
             parsed[name] = str(values[name]).lower()
-    for name in ("cross_check", "use_ransac"):
-        if name in values:
+        elif name in FLAG_FIELDS:
             parsed[name] = bool(values[name])
+        else:
+            parsed[name] = _parse_number(name, values[name])
     return MatchSettings(**parsed)
 
 
