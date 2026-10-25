@@ -27,3 +27,11 @@ Python, tkinter, scikit-learn, numpy, image processing/manipulation
 - [x] Canny edge detection
 - [x] Edge visualization (superimposed on original)
 - [x] Image sharpening
+
+## Week 4
+
+### Functionalities:
+- [x] Normalized cross-correlation image
+- [x] Template matching configs (size, angle, threshold)
+- [x] HOG extraction and visualization
+- [x] Person detection using HOG

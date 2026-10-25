@@ -17,6 +17,8 @@ from .convolution import ConvolutionTool
 from .filters import FiltersTool
 from .sharpen import SharpenTool
 from .template_matching import TemplateMatchingTool
+from .hog import HogTool
+from .person_detection import PersonDetectionTool
 from .corner_detection import CornerDetectionTool
 from .keypoint_detection import KeypointDetectionTool
 from .feature_matching import FeatureMatchingTool
@@ -40,6 +42,8 @@ def build_tool_registry() -> ToolRegistry:
             FiltersTool(),
             SharpenTool(),
             TemplateMatchingTool(),
+            HogTool(),
+            PersonDetectionTool(),
             CornerDetectionTool(),
             KeypointDetectionTool(),
             FeatureMatchingTool(),
