@@ -123,7 +123,7 @@ class TemplateMatchingToolTests(unittest.TestCase):
         self.assertIsNone(self.tool.run(self.parent, self.document))
 
     @patch(ASK_CHOICE, return_value=0)  # No resizing
-    @patch(ASK_YES_NO, return_value=False)
+    @patch(ASK_YES_NO, side_effect=[True, False])  # use_threshold=True, superimpose=False
     @patch(ASK_FLOAT, side_effect=[0.0, 0.8])  # rotation, threshold
     @patch(IMAGE_OPEN)
     @patch(ASK_OPEN_FILENAME, return_value="template.png")
@@ -143,9 +143,10 @@ class TemplateMatchingToolTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.details["Sizing"], "No resizing (keep template as-is)")
         self.assertEqual(result.details["Size Parameter"], "Original")
+        self.assertEqual(result.details["Threshold"], 0.8)
 
     @patch(ASK_CHOICE, return_value=2)  # Resize (H & W)
-    @patch(ASK_YES_NO, return_value=False)
+    @patch(ASK_YES_NO, side_effect=[True, False])  # use_threshold=True, superimpose=False
     @patch(ASK_FLOAT, side_effect=[6.0, 6.0, 0.0, 0.8])  # height, width, rotation, threshold
     @patch(IMAGE_OPEN)
     @patch(ASK_OPEN_FILENAME, return_value="template.png")
@@ -165,10 +166,11 @@ class TemplateMatchingToolTests(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result.details["Sizing"], "Resize (fixed height and width in pixels)")
         self.assertEqual(result.details["Size Parameter"], "6x6")
+        self.assertEqual(result.details["Threshold"], 0.8)
 
     @patch(ASK_CHOICE, return_value=1)
-    @patch(ASK_YES_NO, return_value=False)
-    @patch(ASK_FLOAT, side_effect=[30.0, 0.0, 0.8])
+    @patch(ASK_YES_NO)
+    @patch(ASK_FLOAT)
     @patch(IMAGE_OPEN)
     @patch(ASK_OPEN_FILENAME, return_value="template.png")
     def test_template_matching_binary_mask(
@@ -187,6 +189,7 @@ class TemplateMatchingToolTests(unittest.TestCase):
         for mode in ("RGB", "L", "RGBA", "P"):
             with self.subTest(mode=mode):
                 self.document.current = source.convert(mode)
+                mock_askyesno.side_effect = [True, False]
                 mock_askfloat.side_effect = [30.0, 0.0, 0.8]
                 result = self.tool.run(self.parent, self.document)
 
@@ -205,8 +208,8 @@ class TemplateMatchingToolTests(unittest.TestCase):
                 self.assertEqual(result.details["Alpha"], "N/A")
 
     @patch(ASK_CHOICE, return_value=1)
-    @patch(ASK_YES_NO, return_value=True)
-    @patch(ASK_FLOAT, side_effect=[30.0, 0.0, 0.8, 0.5])
+    @patch(ASK_YES_NO)
+    @patch(ASK_FLOAT)
     @patch(IMAGE_OPEN)
     @patch(ASK_OPEN_FILENAME, return_value="template.png")
     def test_template_matching_superimposed(
@@ -225,6 +228,7 @@ class TemplateMatchingToolTests(unittest.TestCase):
         for mode in ("RGB", "L", "RGBA", "P"):
             with self.subTest(mode=mode):
                 self.document.current = source.convert(mode)
+                mock_askyesno.side_effect = [True, True]
                 mock_askfloat.side_effect = [30.0, 0.0, 0.8, 0.5]
                 result = self.tool.run(self.parent, self.document)
 
@@ -235,6 +239,44 @@ class TemplateMatchingToolTests(unittest.TestCase):
                 self.assertIn("superimposed successfully", result.message)
                 self.assertTrue(result.details["Superimposed"])
                 self.assertEqual(result.details["Alpha"], 0.5)
+
+    @patch(ASK_CHOICE, return_value=1)
+    @patch(ASK_YES_NO)
+    @patch(ASK_FLOAT)
+    @patch(IMAGE_OPEN)
+    @patch(ASK_OPEN_FILENAME, return_value="template.png")
+    def test_template_matching_without_threshold(
+        self,
+        mock_askopen: MagicMock,
+        mock_open: MagicMock,
+        mock_askfloat: MagicMock,
+        mock_askyesno: MagicMock,
+        mock_choice: MagicMock,
+    ) -> None:
+        mock_context = MagicMock()
+        mock_context.copy.return_value = self.mock_template
+        mock_open.return_value.__enter__.return_value = mock_context
+
+        source = self.document.current
+        for mode in ("RGB", "L", "RGBA", "P"):
+            with self.subTest(mode=mode):
+                self.document.current = source.convert(mode)
+                mock_askyesno.side_effect = [False]  # use_threshold=False
+                mock_askfloat.side_effect = [30.0, 0.0]  # scale_pct, rotation
+                result = self.tool.run(self.parent, self.document)
+
+                self.assertIsNotNone(result)
+                self.assertEqual(result.image.mode, "L")
+                self.assertEqual(result.image.size, source.size)
+                self.assertIn("correlation map generated successfully", result.message)
+                self.assertEqual(result.details["Operation"], "Template Matching")
+                self.assertEqual(result.details["Template"], "template.png")
+                self.assertEqual(result.details["Sizing"], "Rescale (% of base image)")
+                self.assertEqual(result.details["Size Parameter"], "30%")
+                self.assertEqual(result.details["Rotation (deg)"], 0.0)
+                self.assertEqual(result.details["Threshold"], "N/A")
+                self.assertEqual(result.details["Superimposed"], "N/A")
+                self.assertEqual(result.details["Alpha"], "N/A")
 
     @patch(SHOW_ERROR)
     @patch(ASK_CHOICE, return_value=1)
@@ -289,6 +331,23 @@ class TemplateMatchingFunctionTests(unittest.TestCase):
         self.assertEqual(arr[15, 15], 255)
         # Background pixel should be 0
         self.assertEqual(arr[0, 0], 0)
+
+    def test_exact_match_detected_without_threshold(self) -> None:
+        corr_img = apply_template_matching(
+            image=self.base_rgb,
+            template=self.patch_rgb,
+            size=None,
+            rotation=0.0,
+            threshold=None,
+        )
+        self.assertEqual(corr_img.mode, "L")
+        self.assertEqual(corr_img.size, self.base_rgb.size)
+
+        arr = np.array(corr_img)
+        # The center of the 6x6 patch placed at [12..18, 12..18] is (15, 15) with correlation close to 1.0 -> 255
+        self.assertGreaterEqual(int(arr[15, 15]), 250)
+        # Background pixel should have lower correlation (< 200)
+        self.assertLess(int(arr[0, 0]), 200)
 
     def test_match_with_rotation(self) -> None:
         # Create a 40x40 image with an L-shaped pattern rotated by 90 degrees
@@ -497,6 +556,18 @@ class TemplateMatchingFunctionTests(unittest.TestCase):
         self.assertEqual(res5.mode, "L")
         self.assertEqual(np.array(res5)[15, 15], 255)
 
+    def test_all_image_modes_matching_without_threshold(self) -> None:
+        # Grayscale, color, RGBA, and palette with threshold=None return mode 'L' correlation
+        modes = ("RGB", "L", "RGBA", "P")
+        for mode in modes:
+            with self.subTest(mode=mode):
+                base = self.base_rgb.convert(mode)
+                patch = self.patch_rgb.convert(mode)
+                res = apply_template_matching(base, patch, size=None, threshold=None)
+                self.assertEqual(res.mode, "L")
+                self.assertEqual(res.size, base.size)
+                self.assertGreaterEqual(int(np.array(res)[15, 15]), 240)
+
     def test_high_depth_image_matching_without_clipping(self) -> None:
         # Create an 'I' mode high-depth image with values well above 255 (e.g. 1000..5000)
         high_depth_arr = np.full((30, 30), 1000, dtype=np.int32)
@@ -534,6 +605,18 @@ class TemplateMatchingFunctionTests(unittest.TestCase):
         self.assertEqual(overlay.mode, "RGB")
         self.assertEqual(overlay.size, img_i.size)
 
+        # Raw correlation map without threshold
+        corr = apply_template_matching(
+            image=img_i,
+            template=tmpl_i,
+            size=None,
+            rotation=0.0,
+            threshold=None,
+        )
+        self.assertEqual(corr.mode, "L")
+        self.assertEqual(corr.size, img_i.size)
+        self.assertGreaterEqual(int(np.array(corr)[15, 15]), 250)
+
     def test_float_mode_image_matching(self) -> None:
         # Create an 'F' mode 32-bit float image
         float_arr = np.full((30, 30), 0.1, dtype=np.float32)
@@ -553,6 +636,16 @@ class TemplateMatchingFunctionTests(unittest.TestCase):
         )
         self.assertEqual(mask.mode, "L")
         self.assertEqual(np.array(mask)[15, 15], 255)
+
+        corr_f = apply_template_matching(
+            image=img_f,
+            template=tmpl_f,
+            size=None,
+            rotation=0.0,
+            threshold=None,
+        )
+        self.assertEqual(corr_f.mode, "L")
+        self.assertGreaterEqual(int(np.array(corr_f)[15, 15]), 250)
 
     def test_la_and_premultiplied_la_mode_matching(self) -> None:
         # Create base image in LA mode with a distinct patch at [12..18, 12..18]
@@ -615,6 +708,14 @@ class TemplateMatchingFunctionTests(unittest.TestCase):
         self.assertEqual(overlay_prem.mode, "RGBA")
         self.assertEqual(overlay_prem.size, base_la_prem.size)
 
+        corr_la = apply_template_matching(base_la, patch_la, size=None, threshold=None)
+        self.assertEqual(corr_la.mode, "L")
+        self.assertGreaterEqual(int(np.array(corr_la)[15, 15]), 250)
+
+        corr_prem = apply_template_matching(base_la_prem, patch_la_prem, size=None, threshold=None)
+        self.assertEqual(corr_prem.mode, "L")
+        self.assertGreaterEqual(int(np.array(corr_prem)[15, 15]), 250)
+
     def test_i16_high_depth_image_matching(self) -> None:
         # Create an 'I;16' 16-bit high-depth image with values 5000..40000
         img_i16 = Image.new("I;16", (30, 30))
@@ -651,6 +752,17 @@ class TemplateMatchingFunctionTests(unittest.TestCase):
         )
         self.assertEqual(overlay.mode, "RGB")
         self.assertEqual(overlay.size, img_i16.size)
+
+        # Raw correlation map without threshold
+        corr_i16 = apply_template_matching(
+            image=img_i16,
+            template=tmpl_i16,
+            size=None,
+            rotation=0.0,
+            threshold=None,
+        )
+        self.assertEqual(corr_i16.mode, "L")
+        self.assertGreaterEqual(int(np.array(corr_i16)[15, 15]), 250)
 
 
 if __name__ == "__main__":

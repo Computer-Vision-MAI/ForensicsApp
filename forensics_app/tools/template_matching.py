@@ -114,11 +114,11 @@ def apply_template_matching(
     template: Image.Image,
     size: float | tuple[int, int] | None = None,
     rotation: float = 0.0,
-    threshold: float = 0.8,
+    threshold: float | None = 0.8,
     superimpose: bool = False,
     alpha: float = 0.6,
 ) -> Image.Image:
-    """Detect template matches and return a binary mask or superimposed image."""
+    """Detect template matches and return a binary mask, superimposed image, or correlation map."""
     base_w, base_h = image.size
     if base_w == 0 or base_h == 0:
         raise ValueError("Image dimensions must be non-zero.")
@@ -157,10 +157,12 @@ def apply_template_matching(
         corr_2d = corr
 
     corr_2d = np.nan_to_num(corr_2d, nan=-1.0)
-    matches = corr_2d >= threshold
 
     # 5. Render output
-    return render_template_result(image, matches, superimpose, alpha)
+    if threshold is not None:
+        matches = corr_2d >= threshold
+        return render_template_result(image, matches, superimpose, alpha)
+    return Image.fromarray(((corr_2d + 1) * 127.5).astype(np.uint8))
 
 
 class TemplateMatchingTool(ForensicsTool):
@@ -246,40 +248,52 @@ class TemplateMatchingTool(ForensicsTool):
         if rotation is None:
             return None
 
-        # 4. Ask threshold (-1.0 to 1.0)
-        threshold = simpledialog.askfloat(
-            "Template Matching Threshold",
-            "Enter correlation threshold (-1.0 to 1.0):",
-            initialvalue=0.8,
-            minvalue=-1.0,
-            maxvalue=1.0,
-            parent=parent,
-        )
-        if threshold is None:
-            return None
-
-        # 5. Superimposability & Alpha weight
-        superimpose = messagebox.askyesno(
-            "Output Style",
-            "Do you want to superimpose the match over the original image?\n\n"
-            "(Select 'Yes' for a red overlay on the original, 'No' for a thresholded mask)",
+        # 4. Ask if threshold should be used
+        use_threshold = messagebox.askyesno(
+            "Threshold Matching",
+            "Do you want to visualize the match with a threshold?\n\n"
+            "(Select 'Yes' to threshold matches, 'No' for raw correlation map)",
             parent=parent,
         )
 
+        threshold: float | None = None
+        superimpose = False
         alpha = 0.6
-        if superimpose:
-            alpha = simpledialog.askfloat(
-                "Superimpose Weight",
-                "Enter Blending Weight (0-1):",
-                initialvalue=0.6,
-                minvalue=0.0,
+
+        if use_threshold:
+            # 5. Ask threshold (-1.0 to 1.0)
+            threshold = simpledialog.askfloat(
+                "Template Matching Threshold",
+                "Enter correlation threshold (-1.0 to 1.0):",
+                initialvalue=0.8,
+                minvalue=-1.0,
                 maxvalue=1.0,
                 parent=parent,
             )
-            if alpha is None:
+            if threshold is None:
                 return None
 
-        # 6. Apply template matching
+            # 6. Superimposability & Alpha weight
+            superimpose = messagebox.askyesno(
+                "Output Style",
+                "Do you want to superimpose the match over the original image?\n\n"
+                "(Select 'Yes' for a red overlay on the original, 'No' for a thresholded mask)",
+                parent=parent,
+            )
+
+            if superimpose:
+                alpha = simpledialog.askfloat(
+                    "Superimpose Weight",
+                    "Enter Blending Weight (0-1):",
+                    initialvalue=0.6,
+                    minvalue=0.0,
+                    maxvalue=1.0,
+                    parent=parent,
+                )
+                if alpha is None:
+                    return None
+
+        # 7. Apply template matching
         try:
             out_img = apply_template_matching(
                 image=document.current,
@@ -294,11 +308,14 @@ class TemplateMatchingTool(ForensicsTool):
             messagebox.showerror("Processing Error", str(error), parent=parent)
             return None
 
-        msg = (
-            "Template matching result superimposed successfully."
-            if superimpose
-            else "Template matching mask generated successfully."
-        )
+        if threshold is not None:
+            msg = (
+                "Template matching result superimposed successfully."
+                if superimpose
+                else "Template matching mask generated successfully."
+            )
+        else:
+            msg = "Template matching correlation map generated successfully."
 
         return ToolResult(
             image=out_img,
@@ -315,9 +332,9 @@ class TemplateMatchingTool(ForensicsTool):
                     else f"{size[0]}x{size[1]}"
                 ),
                 "Rotation (deg)": rotation,
-                "Threshold": threshold,
-                "Superimposed": superimpose,
-                "Alpha": alpha if superimpose else "N/A",
+                "Threshold": threshold if threshold is not None else "N/A",
+                "Superimposed": superimpose if threshold is not None else "N/A",
+                "Alpha": alpha if (threshold is not None and superimpose) else "N/A",
             },
         )
 
