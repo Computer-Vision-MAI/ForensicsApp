@@ -17,6 +17,12 @@ from .convolution import ConvolutionTool
 from .filters import FiltersTool
 from .sharpen import SharpenTool
 from .template_matching import TemplateMatchingTool
+from .hog import HogTool
+from .person_detection import PersonDetectionTool
+from .corner_detection import CornerDetectionTool
+from .keypoint_detection import KeypointDetectionTool
+from .feature_matching import FeatureMatchingTool
+from .image_lookup import ImageLookupTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -36,8 +42,22 @@ def build_tool_registry() -> ToolRegistry:
             FiltersTool(),
             SharpenTool(),
             TemplateMatchingTool(),
+            HogTool(),
+            PersonDetectionTool(),
+            CornerDetectionTool(),
+            KeypointDetectionTool(),
+            FeatureMatchingTool(),
+            ImageLookupTool(),
         ]
     )
 
 
-__all__ = ["ToolRegistry", "build_tool_registry", "TemplateMatchingTool"]
+__all__ = [
+    "ToolRegistry",
+    "build_tool_registry",
+    "TemplateMatchingTool",
+    "CornerDetectionTool",
+    "KeypointDetectionTool",
+    "FeatureMatchingTool",
+    "ImageLookupTool",
+]

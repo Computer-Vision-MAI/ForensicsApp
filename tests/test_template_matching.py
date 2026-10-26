@@ -18,10 +18,11 @@ from forensics_app.tools.template_matching import (
     to_unit_gray_array,
 )
 
-ASK_OPEN_FILENAME = "forensics_app.tools.template_matching.filedialog.askopenfilename"
+ASK_OPEN_FILENAME = "forensics_app.tools.dialogs.filedialog.askopenfilename"
 ASK_YES_NO = "forensics_app.tools.template_matching.messagebox.askyesno"
 SHOW_ERROR = "forensics_app.tools.template_matching.messagebox.showerror"
-IMAGE_OPEN = "forensics_app.tools.template_matching.Image.open"
+DIALOG_SHOW_ERROR = "forensics_app.tools.dialogs.messagebox.showerror"
+IMAGE_OPEN = "forensics_app.tools.dialogs.Image.open"
 ASK_FLOAT = "forensics_app.tools.template_matching.simpledialog.askfloat"
 ASK_CHOICE = "forensics_app.tools.template_matching.ask_choice"
 
@@ -48,7 +49,7 @@ class TemplateMatchingToolTests(unittest.TestCase):
         result = self.tool.run(self.parent, self.document)
         self.assertIsNone(result)
 
-    @patch(SHOW_ERROR)
+    @patch(DIALOG_SHOW_ERROR)
     @patch(IMAGE_OPEN, side_effect=UnidentifiedImageError("Cannot read file"))
     @patch(ASK_OPEN_FILENAME, return_value="broken.jpg")
     def test_returns_none_on_image_open_error(
@@ -232,7 +233,8 @@ class TemplateMatchingToolTests(unittest.TestCase):
                 result = self.tool.run(self.parent, self.document)
 
                 self.assertIsNotNone(result)
-                self.assertEqual(result.image.mode, "RGB")
+                expected_mode = "RGBA" if mode == "RGBA" else "RGB"
+                self.assertEqual(result.image.mode, expected_mode)
                 self.assertEqual(result.image.size, source.size)
                 self.assertIn("superimposed successfully", result.message)
                 self.assertTrue(result.details["Superimposed"])
@@ -676,7 +678,7 @@ class TemplateMatchingFunctionTests(unittest.TestCase):
             superimpose=True,
             alpha=0.6,
         )
-        self.assertEqual(overlay_la.mode, "RGB")
+        self.assertEqual(overlay_la.mode, "RGBA")
         self.assertEqual(overlay_la.size, base_la.size)
 
         # Test "La" (premultiplied alpha) mode mask and overlay
@@ -703,7 +705,7 @@ class TemplateMatchingFunctionTests(unittest.TestCase):
             superimpose=True,
             alpha=0.6,
         )
-        self.assertEqual(overlay_prem.mode, "RGB")
+        self.assertEqual(overlay_prem.mode, "RGBA")
         self.assertEqual(overlay_prem.size, base_la_prem.size)
 
         corr_la = apply_template_matching(base_la, patch_la, size=None, threshold=None)

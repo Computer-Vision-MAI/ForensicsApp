@@ -25,6 +25,8 @@ class ToolTests(unittest.TestCase):
         registry = build_tool_registry()
         tool_ids = [tool.tool_id for tool in registry.all()]
         self.assertIn("template_matching", tool_ids)
+        self.assertIn("corner_detection", tool_ids)
+        self.assertIn("keypoint_detection", tool_ids)
 
 
 class LoadImageFileTests(unittest.TestCase):

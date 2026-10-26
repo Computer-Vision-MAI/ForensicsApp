@@ -241,5 +241,206 @@ class UnitArrayTest(unittest.TestCase):
         self.assertEqual(seen, [(2, 3)] * 3)
         np.testing.assert_array_equal(result, color * 2)
 
+
+class FeatureOverlayUtilsTest(unittest.TestCase):
+    def test_to_grayscale_array_modes(self) -> None:
+        from forensics_app.tools.image_utils import to_grayscale_array
+
+        for mode in ("RGB", "RGBA", "RGBa", "L", "1", "P", "CMYK", "LA", "La"):
+            with self.subTest(mode=mode):
+                im = Image.new(mode, (8, 8))
+                arr = to_grayscale_array(im)
+                self.assertEqual(arr.shape, (8, 8))
+                self.assertEqual(arr.dtype, np.float64)
+
+    def test_to_grayscale_array_high_depth(self) -> None:
+        from forensics_app.tools.image_utils import to_grayscale_array
+
+        arr = np.array([[100, 200], [300, 400]], dtype=np.int32)
+        im = Image.fromarray(arr, mode="I")
+        res = to_grayscale_array(im)
+        self.assertEqual(res.shape, (2, 2))
+        self.assertAlmostEqual(res[0, 0], 0.0)
+        self.assertAlmostEqual(res[1, 1], 1.0)
+
+    def test_render_feature_overlay_invalid_alpha(self) -> None:
+        from forensics_app.tools.image_utils import render_feature_overlay
+
+        im = Image.new("RGB", (4, 4))
+        with self.assertRaises(ValueError):
+            render_feature_overlay(im, coords=None, superimpose=True, alpha=-0.1)
+        with self.assertRaises(ValueError):
+            render_feature_overlay(im, coords=None, superimpose=True, alpha=1.5)
+
+    def test_render_feature_overlay_empty_coords(self) -> None:
+        from forensics_app.tools.image_utils import render_feature_overlay
+
+        im = Image.new("RGB", (4, 4), (50, 50, 50))
+        mask = render_feature_overlay(im, coords=None, superimpose=False)
+        self.assertEqual(mask.mode, "L")
+        self.assertEqual(set(np.unique(mask)), {0})
+
+        overlay = render_feature_overlay(im, coords=np.empty((0, 2)), superimpose=True)
+        self.assertEqual(overlay.mode, "RGB")
+        np.testing.assert_array_equal(np.array(overlay), np.array(im))
+
+    def test_render_mask_overlay_modes(self) -> None:
+        from forensics_app.tools.image_utils import render_mask_overlay
+
+        im = Image.new("RGB", (4, 4), (10, 20, 30))
+        mask = np.zeros((4, 4), dtype=bool)
+        mask[1, 1] = True
+
+        out_mask = render_mask_overlay(im, mask, superimpose=False)
+        self.assertEqual(out_mask.mode, "L")
+        self.assertEqual(np.array(out_mask)[1, 1], 255)
+        self.assertEqual(np.array(out_mask)[0, 0], 0)
+
+        out_overlay = render_mask_overlay(im, mask, superimpose=True, alpha=0.5)
+        self.assertEqual(out_overlay.mode, "RGB")
+        expected_r = int(np.round(10 * 0.5 + 255 * 0.5))
+        np.testing.assert_array_equal(np.array(out_overlay)[1, 1], [expected_r, 10, 15])
+
+    def test_render_feature_overlay_fractional_and_out_of_bounds(self) -> None:
+        from forensics_app.tools.image_utils import render_feature_overlay
+
+        im = Image.new("RGB", (6, 6), (0, 0, 0))
+        # [1.4, 2.6] should round to (1, 3); [-10.0, 50.0] should clip to (0, 5)
+        coords = np.array([[1.4, 2.6], [-10.0, 50.0]])
+        mask = render_feature_overlay(im, coords, superimpose=False)
+        arr = np.array(mask)
+        self.assertEqual(arr[1, 3], 255)
+        self.assertEqual(arr[0, 5], 255)
+        self.assertEqual(arr[2, 2], 0)
+
+    def test_render_feature_overlay_marker_radius_border(self) -> None:
+        from forensics_app.tools.image_utils import render_feature_overlay
+
+        im = Image.new("RGB", (6, 6), (0, 0, 0))
+        # Marker radius at top-left corner (0, 0)
+        coords = np.array([[0, 0]])
+        mask = render_feature_overlay(im, coords, superimpose=False, marker_radius=2)
+        arr = np.array(mask)
+        self.assertEqual(arr[0, 0], 255)
+        self.assertEqual(arr[0, 1], 255)
+        self.assertEqual(arr[1, 0], 255)
+        self.assertEqual(arr[5, 5], 0)
+
+    def test_render_feature_overlay_superimpose_all_modes(self) -> None:
+        from forensics_app.tools.image_utils import render_feature_overlay
+
+        coords = np.array([[1, 1]])
+
+        # Test mode '1'
+        im_1 = Image.new("1", (4, 4), 1)
+        res_1 = render_feature_overlay(im_1, coords, superimpose=True)
+        self.assertEqual(res_1.mode, "RGB")
+        self.assertEqual(res_1.size, (4, 4))
+
+        # Test mode 'P'
+        im_p = Image.new("P", (4, 4))
+        im_p.putpalette([0, 0, 0, 255, 255, 255] + [0] * 762)
+        res_p = render_feature_overlay(im_p, coords, superimpose=True)
+        self.assertEqual(res_p.mode, "RGB")
+
+        # Test mode 'La'
+        im_la = Image.new("LA", (4, 4), (100, 200)).convert("La")
+        res_la = render_feature_overlay(im_la, coords, superimpose=True)
+        self.assertEqual(res_la.mode, "RGBA")
+        self.assertEqual(np.array(res_la)[0, 0, 3], 200)
+
+        # Test mode 'RGBa' (premultiplied alpha)
+        im_rgba_prem = Image.new("RGBA", (4, 4), (100, 150, 200, 220)).convert("RGBa")
+        res_rgba_prem = render_feature_overlay(im_rgba_prem, coords, superimpose=True)
+        self.assertEqual(res_rgba_prem.mode, "RGBA")
+        self.assertEqual(np.array(res_rgba_prem)[0, 0, 3], 220)
+
+        # Test mode 'I' and 'F'
+        im_i = Image.fromarray(np.ones((4, 4), dtype=np.int32) * 5000, mode="I")
+        res_i = render_feature_overlay(im_i, coords, superimpose=True)
+        self.assertEqual(res_i.mode, "RGB")
+
+        im_f = Image.fromarray(np.ones((4, 4), dtype=np.float32) * 0.5, mode="F")
+        res_f = render_feature_overlay(im_f, coords, superimpose=True)
+        self.assertEqual(res_f.mode, "RGB")
+
+        # Test mode 'I;16'
+        arr16 = np.ones((4, 4), dtype=np.uint16) * 10000
+        im_16 = Image.fromarray(arr16)
+        res_16 = render_feature_overlay(im_16, coords, superimpose=True)
+        self.assertEqual(res_16.mode, "RGB")
+
+    def test_render_keypoint_overlay_circumference_and_orientation(self) -> None:
+        from forensics_app.tools.image_utils import render_keypoint_overlay
+
+        im = Image.new("RGB", (30, 30), (0, 0, 0))
+        coords = np.array([[15.0, 15.0]])
+        scales = np.array([5.0])
+        orientations = np.array([0.0])  # pointing right: (15, 20) in (r, c) or (x+5, y) in image space
+
+        # Binary mask mode
+        mask = render_keypoint_overlay(
+            im, coords, scales=scales, orientations=orientations, superimpose=False
+        )
+        self.assertEqual(mask.mode, "L")
+        self.assertEqual(mask.size, (30, 30))
+        arr = np.array(mask)
+        # Center should be marked
+        self.assertEqual(arr[15, 15], 255)
+        # Top and bottom of circumference (radius 5) should be marked
+        self.assertEqual(arr[10, 15], 255)
+        self.assertEqual(arr[20, 15], 255)
+        # Orientation ray points right (x + 5 = col 20)
+        self.assertEqual(arr[15, 20], 255)
+        # Far-away pixel should be 0
+        self.assertEqual(arr[0, 0], 0)
+
+        # Superimposed mode
+        overlay = render_keypoint_overlay(
+            im, coords, scales=scales, orientations=orientations, superimpose=True, alpha=0.5
+        )
+        self.assertEqual(overlay.mode, "RGB")
+        arr_rgb = np.array(overlay)
+        # Center should be blended red [128, 0, 0] approx
+        self.assertGreater(arr_rgb[15, 15, 0], 100)
+        self.assertEqual(arr_rgb[15, 15, 1], 0)
+
+    def test_render_keypoint_overlay_empty_and_nan(self) -> None:
+        from forensics_app.tools.image_utils import render_keypoint_overlay
+
+        im = Image.new("RGB", (10, 10), (0, 0, 0))
+        # Empty coords
+        mask_empty = render_keypoint_overlay(im, np.empty((0, 2)), superimpose=False)
+        self.assertTrue(np.all(np.array(mask_empty) == 0))
+
+        # None coords
+        mask_none = render_keypoint_overlay(im, None, superimpose=False)
+        self.assertTrue(np.all(np.array(mask_none) == 0))
+
+        # NaN coords
+        mask_nan = render_keypoint_overlay(im, np.array([[np.nan, np.nan]]), superimpose=False)
+        self.assertTrue(np.all(np.array(mask_nan) == 0))
+
+    def test_render_mask_overlay_preserves_alpha(self) -> None:
+        from forensics_app.tools.image_utils import render_mask_overlay
+
+        im = Image.new("RGBA", (4, 4), (50, 100, 150, 200))
+        mask = np.zeros((4, 4), dtype=bool)
+        mask[1, 1] = True
+        res = render_mask_overlay(im, mask, superimpose=True, alpha=0.5)
+        self.assertEqual(res.mode, "RGBA")
+        arr = np.array(res)
+        self.assertEqual(arr[0, 0, 3], 200)
+        self.assertEqual(arr[1, 1, 3], 255)
+
+        # Test RGBa mode (premultiplied alpha where getbands() originally returns ('R', 'G', 'B', 'a'))
+        im_prem = Image.new("RGBA", (4, 4), (50, 100, 150, 220)).convert("RGBa")
+        res_prem = render_mask_overlay(im_prem, mask, superimpose=True, alpha=0.5)
+        self.assertEqual(res_prem.mode, "RGBA")
+        arr_prem = np.array(res_prem)
+        self.assertEqual(arr_prem[0, 0, 3], 220)
+        self.assertEqual(arr_prem[1, 1, 3], 255)
+
+
 if __name__ == "__main__":
     unittest.main()
