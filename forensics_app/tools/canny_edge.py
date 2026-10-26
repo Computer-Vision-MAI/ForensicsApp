@@ -6,7 +6,7 @@ from skimage import feature
 
 from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
-from .image_utils import normalize_high_depth_image
+from .image_utils import render_mask_overlay, to_grayscale_array
 
 def apply_canny_edge(
     img: Image.Image,
@@ -17,33 +17,14 @@ def apply_canny_edge(
     alpha: float = 0.6,
 ) -> Image.Image:
     """Detect edges and return a binary mask or an overlay on the source colors."""
-    mode = img.mode
-    is_high_depth = mode in ("I", "F") or mode.startswith("I;16")
-    is_gray = mode in ("L", "I", "F") or mode.startswith("I;16")
-    
-    if is_high_depth:
-        gray_arr = (normalize_high_depth_image(img) * 255.0).astype(np.uint8)
-    else:
-        gray_arr = np.array(img.convert("L"))
-
+    gray_arr = (to_grayscale_array(img) * 255.0).astype(np.uint8)
     edges = feature.canny(
         gray_arr,
         sigma=sigma,
         low_threshold=low_threshold,
         high_threshold=high_threshold,
     )
-    if superimpose:
-        # If the image is high-depth, we need to convert it to a standard RGB array for superimposition.
-        # But we use the normlized grayscale to ensure we don't lose the high-depth information in the edge detection process.
-        if is_high_depth:
-            rgb_arr = np.stack((gray_arr,) * 3, axis=-1).astype(np.float32)
-        else:
-            rgb_arr = np.array(img.convert("RGB"), dtype=np.float32)
-        edge_color = np.array([255, 0, 0], dtype=np.float32)
-        rgb_arr[edges] = rgb_arr[edges] * (1.0 - alpha) + edge_color * alpha
-        return Image.fromarray(np.clip(rgb_arr, 0, 255).astype(np.uint8))
-
-    return Image.fromarray((edges * 255).astype(np.uint8))
+    return render_mask_overlay(img, edges, superimpose=superimpose, alpha=alpha)
 
 
 class CannyEdgeTool(ForensicsTool):

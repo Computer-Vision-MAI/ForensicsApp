@@ -60,7 +60,8 @@ class CannyEdgeToolTests(unittest.TestCase):
                 result = self.tool.run(self.parent, self.document)
 
                 self.assertIsNotNone(result)
-                self.assertEqual(result.image.mode, "RGB")
+                expected_mode = "RGBA" if mode == "RGBA" else "RGB"
+                self.assertEqual(result.image.mode, expected_mode)
                 self.assertEqual(result.image.size, source.size)
 
     @patch("tkinter.messagebox.askyesno")
@@ -141,6 +142,34 @@ class CannyEdgeFunctionTests(unittest.TestCase):
         expected_edges = (original[edges] * 0.5 + np.array([255, 0, 0]) * 0.5).astype(np.uint8)
         np.testing.assert_array_equal(actual[edges], expected_edges)
         np.testing.assert_array_equal(np.array(source), original)
+
+    def test_canny_overlay_preserves_alpha(self) -> None:
+        source_rgba = Image.new("RGBA", (10, 10), (10, 30, 50, 180))
+        source_rgba.paste((200, 180, 160, 180), (3, 3, 7, 7))
+        overlay = apply_canny_edge(source_rgba, 0.0, 10.0, 50.0, superimpose=True, alpha=0.5)
+        self.assertEqual(overlay.mode, "RGBA")
+        self.assertEqual(overlay.size, source_rgba.size)
+        arr = np.array(overlay)
+        # Background pixels maintain their alpha
+        self.assertEqual(arr[0, 0, 3], 180)
+        # Edge pixels are active with alpha
+        self.assertEqual(arr[3, 3, 3], 255)
+
+    def test_canny_overlay_preserves_alpha_premultiplied(self) -> None:
+        source_rgba = Image.new("RGBA", (10, 10), (10, 30, 50, 180))
+        source_rgba.paste((200, 180, 160, 180), (3, 3, 7, 7))
+        source_prem = source_rgba.convert("RGBa")
+
+        mask_rgba = apply_canny_edge(source_rgba, 0.0, 10.0, 50.0, superimpose=False)
+        mask_prem = apply_canny_edge(source_prem, 0.0, 10.0, 50.0, superimpose=False)
+        np.testing.assert_array_equal(np.array(mask_prem), np.array(mask_rgba))
+
+        overlay_prem = apply_canny_edge(source_prem, 0.0, 10.0, 50.0, superimpose=True, alpha=0.5)
+        self.assertEqual(overlay_prem.mode, "RGBA")
+        self.assertEqual(overlay_prem.size, source_prem.size)
+        arr = np.array(overlay_prem)
+        self.assertEqual(arr[0, 0, 3], 180)
+        self.assertEqual(arr[3, 3, 3], 255)
 
 
 if __name__ == "__main__":

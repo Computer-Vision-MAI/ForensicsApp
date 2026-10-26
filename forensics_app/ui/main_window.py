@@ -25,6 +25,14 @@ OPEN_TYPES = [
 SAVE_TYPES = [("PNG image", "*.png"), ("JPEG image", "*.jpg"), ("TIFF image", "*.tiff")]
 
 
+def _mousewheel_units(delta: int) -> int:
+    if sys.platform == "darwin" and tk.TkVersion < 8.7:
+        return -delta
+
+    units = int(-delta / 120)
+    return units if units else (-1 if delta > 0 else 1)
+
+
 class MainWindow:
     def __init__(self, root: tk.Tk, registry: ToolRegistry) -> None:
         self.root = root
@@ -131,13 +139,7 @@ class MainWindow:
             elif event.num == 5:
                 canvas.yview_scroll(1, "units")
             elif event.delta:
-                if sys.platform == "darwin":
-                    units = int(-1 * event.delta)
-                else:
-                    units = int(-1 * (event.delta / 120))
-                if units == 0:
-                    units = -1 if event.delta > 0 else 1
-                canvas.yview_scroll(units, "units")
+                canvas.yview_scroll(_mousewheel_units(event.delta), "units")
 
         def _bind_scroll(widget: tk.Misc) -> None:
             widget.bind("<MouseWheel>", _on_mousewheel, add="+")
