@@ -7,11 +7,13 @@ import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from PIL import UnidentifiedImageError
+from PIL import ImageTk, UnidentifiedImageError
 
 from forensics_app.core import ImageDocument
 from forensics_app.tools.base import ForensicsTool
 from forensics_app.tools.registry import ToolRegistry
+from .icons import magnifier_icon
+from .image_placement import ImagePlacement
 from .image_view import ImageView
 from forensics_app.core.pixel_info import pixel_color, describe_pixel
 
@@ -38,6 +40,7 @@ class MainWindow:
         self.document = ImageDocument()
         self.status = tk.StringVar(value="Ready. Open an image to begin.")
         self.pixel_info = tk.StringVar(value="Hover over the image to inspect pixels.")
+        self.zoom_info = tk.StringVar(value="No image")
 
         self._configure_window()
         self._build_menu()
@@ -166,8 +169,13 @@ class MainWindow:
                 _bind_scroll(button)
 
 
-        self.image_view = ImageView(body, on_hover=self._on_pixel_hover)
-        body.add(self.image_view, weight=1)
+        image_pane = ttk.Frame(body)
+        body.add(image_pane, weight=1)
+        self._build_zoom_bar(image_pane)
+        self.image_view = ImageView(
+            image_pane, on_hover=self._on_pixel_hover, on_zoom=self._on_view_change
+        )
+        self.image_view.pack(fill="both", expand=True)
 
         inspector = ttk.Frame(body, padding=12, width=250)
         inspector.pack_propagate(False)
@@ -192,11 +200,59 @@ class MainWindow:
             side="left", fill="x", expand=True
         )
 
+    def _build_zoom_bar(self, parent: tk.Misc) -> None:
+        """Zoom controls above the image. They only change the view, never the document."""
+        bar = ttk.Frame(parent, padding=(8, 8, 8, 0))
+        bar.pack(fill="x")
+        # Keep references to the icons so Tk doesn't garbage-collect them.
+        self._zoom_icons = {
+            sign: ImageTk.PhotoImage(magnifier_icon(sign), master=self.root) for sign in ("+", "-")
+        }
+        buttons = (
+            (self._zoom_icons["+"], "", self.zoom_in, "Zoom in (Ctrl++ or Ctrl+wheel). The image itself is not resized."),
+            (self._zoom_icons["-"], "", self.zoom_out, "Zoom out (Ctrl+- or Ctrl+wheel). The image itself is not resized."),
+            ("", "Fit to window", self.reset_zoom, "Show the whole image fitted to the window (Ctrl+0)."),
+        )
+        for icon, text, command, help_text in buttons:
+            button = ttk.Button(bar, image=icon, text=text, command=command)
+            button.pack(side="left", padx=(0, 6))
+            button.bind("<Enter>", lambda _event, message=help_text: self.status.set(message))
+            button.bind("<Leave>", lambda _event: self.status.set("Ready."))
+        ttk.Label(bar, textvariable=self.zoom_info, anchor="e").pack(side="right")
+
     def _bind_shortcuts(self) -> None:
         self.root.bind_all("<Control-o>", lambda _event: self.open_image())
         self.root.bind_all("<Control-Shift-S>", lambda _event: self.save_image())
         self.root.bind_all("<Control-z>", lambda _event: self.undo())
         self.root.bind_all("<Control-y>", lambda _event: self.redo())
+        for sequence in ("<Control-plus>", "<Control-equal>", "<Control-KP_Add>"):
+            self.root.bind_all(sequence, lambda _event: self.zoom_in())
+        for sequence in ("<Control-minus>", "<Control-KP_Subtract>"):
+            self.root.bind_all(sequence, lambda _event: self.zoom_out())
+        self.root.bind_all("<Control-0>", lambda _event: self.reset_zoom())
+
+    def zoom_in(self) -> None:
+        self.image_view.zoom_in()
+
+    def zoom_out(self) -> None:
+        self.image_view.zoom_out()
+
+    def reset_zoom(self) -> None:
+        self.image_view.reset_zoom()
+
+    def _on_view_change(self, placement: ImagePlacement | None, fitted: bool) -> None:
+        """Show the on-screen resolution and zoom of the displayed image."""
+        if placement is None:
+            self.zoom_info.set("No image")
+            return
+        shown_width, shown_height = placement.shown_size
+        source_width, source_height = placement.source_size
+        percent = 100.0 * shown_width / source_width
+        fit = " (fit)" if fitted else ""
+        self.zoom_info.set(
+            f"View {shown_width} × {shown_height} px · {percent:.0f}%{fit}"
+            f" · Image {source_width} × {source_height} px"
+        )
 
     def open_image(self) -> None:
         filename = filedialog.askopenfilename(title="Open evidence image", filetypes=OPEN_TYPES)
@@ -210,6 +266,7 @@ class MainWindow:
         self.status.set(f"Opened {Path(filename).name}")
         self._show_default_details()
         self._refresh()
+        self.image_view.reset_zoom()  # a new image always starts fitted to the window
 
     def save_image(self) -> None:
         if not self._require_image():

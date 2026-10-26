@@ -76,6 +76,8 @@ class ComputeHogTests(unittest.TestCase):
         )
 
     def test_rejects_an_image_smaller_than_one_block(self):
+        with self.assertRaisesRegex(ValueError, "smaller than one HOG block"):
+            compute_hog(np.zeros((20, 40)), HogParameters(9, 8, 3))
         pixels = np.zeros((20, 40))
         parameters = HogParameters(9, 8, 3)
         with self.assertRaisesRegex(ValueError, "smaller than one HOG block"):
