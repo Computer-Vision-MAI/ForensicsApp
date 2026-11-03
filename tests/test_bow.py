@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -15,7 +16,7 @@ from forensics_app.core import ImageDocument
 from forensics_app.tools import BowClassifyTool, BowCodebookTool, BowHistogramTool, build_tool_registry
 from forensics_app.tools import bow_model as bm
 from forensics_app.tools.bow_dialogs import parse_k
-from forensics_app.tools.bow_render import render_codebook, render_confusion, render_word_histogram, word_tile
+from forensics_app.tools.bow_render import display_copy, render_codebook, render_confusion, render_word_histogram, word_tile
 from forensics_app.tools.bow_tools import TRAIN_WARNING, model_details
 from forensics_app.tools.dialogs import TaskCancelled
 
@@ -80,6 +81,16 @@ class SettingsAndDatasetTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "two class subfolders"):
                 bm.list_dataset(tmp)
 
+    def test_split_rejects_classes_left_with_one_training_image(self) -> None:
+        dataset = {"big": [Path(f"big/{i}.png") for i in range(10)], "tiny": [Path("tiny/0.png"), Path("tiny/1.png")]}
+        bm.split_dataset(dataset, 0.2, seed=0)  # 20 %: both tiny images stay in train
+        with self.assertRaisesRegex(ValueError, "fewer than 2 training images: tiny"):
+            bm.split_dataset(dataset, 0.5, seed=0)  # 50 %: one tiny image goes to test
+
+    def test_default_model_path_does_not_depend_on_the_working_folder(self) -> None:
+        self.assertTrue(bm.DEFAULT_MODEL_PATH.is_absolute())
+        self.assertTrue(bm.DEFAULT_MODEL_PATH.is_relative_to(Path.home()))
+
     def test_split_is_stratified_disjoint_and_reproducible(self) -> None:
         dataset = {name: [Path(f"{name}/{i}.png") for i in range(n)] for name, n in (("a", 20), ("b", 10))}
         train_p, train_y, test_p, test_y = bm.split_dataset(dataset, 0.2, seed=3)
@@ -101,6 +112,25 @@ class FeatureTests(unittest.TestCase):
         features, _ = bm.extract_features(texture("dots", 1), FAST)
         self.assertEqual(features.descriptors.shape[1], bm.descriptor_size("dense"))
         self.assertEqual(len(np.unique(np.diff(np.unique(features.positions[:, 0])))), 1)
+
+    def test_every_image_mode_is_converted(self) -> None:
+        color = Image.fromarray(data.astronaut()).resize((160, 160))
+        gray = np.asarray(Image.fromarray(data.camera()).resize((160, 160)))
+        images = {mode: color.convert(mode) for mode in ("RGB", "RGBA", "P", "L", "LA", "1", "CMYK", "I")}
+        images["I;16"] = Image.fromarray(gray.astype(np.uint16) * 256)
+        images["F"] = Image.fromarray(gray.astype(np.float32) / 255)
+        for mode, image in images.items():
+            for detector in ("sift", "dense"):
+                with self.subTest(mode=mode, detector=detector):
+                    features, working = bm.extract_features(image, bm.BowSettings(detector=detector))
+                    self.assertEqual(working.mode, "L")
+                    self.assertGreater(len(features), 0)
+                    self.assertEqual(features.descriptors.shape[1], bm.descriptor_size(detector))
+                    self.assertEqual(features.shape, (working.height, working.width))
+            with self.subTest(mode=mode, part="display"):
+                shown = display_copy(image, working)
+                self.assertEqual(shown.shape, (working.height, working.width, 3))
+                self.assertEqual(shown.dtype, np.uint8)
 
     def test_flat_image_gives_no_features_without_crashing(self) -> None:
         features, _ = bm.extract_features(Image.new("L", (80, 80), 128), bm.BowSettings())
@@ -255,7 +285,11 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(bm.image_split(self.model, "/elsewhere/photo.png"), "external")
         self.assertEqual(bm.image_split(self.model, None), "external")
         # a relative path to a training file is still recognised
-        relative = Path(train).relative_to(Path.cwd(), walk_up=True)
+        # (Path.relative_to(walk_up=True) needs Python 3.12; os.path.relpath works on 3.10)
+        try:
+            relative = os.path.relpath(train)
+        except ValueError:  # Windows: temp folder and working folder on different drives
+            self.skipTest("no relative path between drives")
         self.assertEqual(bm.image_split(self.model, relative), "train")
 
     def test_save_and_load_round_trip(self) -> None:
@@ -280,6 +314,21 @@ class PipelineTests(unittest.TestCase):
         best, results = bm.choose_k_by_cv(features, self.model.train_labels, [3, 6], FAST)
         self.assertIn(best, (3, 6))
         self.assertEqual([k for k, _ in results], [3, 6])
+
+    def test_unreadable_image_names_the_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_dataset(root, per_class=8)
+            (root / "dots" / "broken.png").write_bytes(b"not really a png")
+            with self.assertRaisesRegex(ValueError, "Could not read .*broken.png"):
+                bm.train_bow_model(root, FAST)
+
+    def test_save_checks_what_was_written(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch.object(bm.BowModel, "load", return_value=bm.BowModel.load(self.model.save(Path(tmp) / "a.joblib"))):
+            other = bm.train_bow_model(self.root, bm.BowSettings(**{**FAST.__dict__, "k": 4}))
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                other.save(Path(tmp) / "b.joblib")
 
     def test_training_can_be_cancelled(self) -> None:
         with self.assertRaises(TaskCancelled):
@@ -361,6 +410,16 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(result.preview_only)
         self.assertIn("Test accuracy", result.details)
         self.assertIs(bm.get_model(), bm._session["model"])
+
+    def test_codebook_tool_keeps_the_model_when_saving_fails(self) -> None:
+        with patch("forensics_app.tools.bow_tools.filedialog.askdirectory", return_value=str(self.root)), \
+             patch("forensics_app.tools.bow_tools.ask_bow_settings", return_value=FAST), \
+             patch.object(bm.BowModel, "save", side_effect=OSError("read-only folder")):
+            result = BowCodebookTool().run(None, ImageDocument())
+        self.assertIn("could not be saved", result.message)
+        self.assertEqual(result.details["Model NOT saved"], "read-only folder")
+        self.assertNotIn("Model saved to", result.details)
+        self.assertEqual(bm.get_model().k, FAST.k)  # still usable in this session
 
     def test_codebook_tool_cancel(self) -> None:
         with patch("forensics_app.tools.bow_tools.filedialog.askdirectory", return_value=""):

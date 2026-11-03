@@ -133,18 +133,22 @@ class BowCodebookTool(ForensicsTool):
             model = run_with_progress(parent, self.title, task)
         except TaskCancelled:
             return None
-        path = model.save(DEFAULT_MODEL_PATH)
-        set_model(model)
-        image = stack_vertical([render_codebook(model), render_confusion(model)])
-        return ToolResult(
-            message=(
-                f"Codebook of {model.k} visual words built from {len(model.train_paths)} training images; "
-                f"test accuracy {model.metrics['accuracy']:.1%}."
-            ),
-            image=image,
-            details=model_details(model, path),
-            preview_only=True,
+        set_model(model)  # usable in this session even if saving fails below
+        message = (
+            f"Codebook of {model.k} visual words built from {len(model.train_paths)} training images; "
+            f"test accuracy {model.metrics['accuracy']:.1%}."
         )
+        try:
+            path: Path | None = model.save(DEFAULT_MODEL_PATH)
+            save_error = None
+        except (OSError, ValueError) as error:
+            path, save_error = None, str(error)
+            message += " The model could not be saved: it only lasts until the app is closed."
+        details = model_details(model, path)
+        if save_error is not None:
+            details["Model NOT saved"] = save_error
+        image = stack_vertical([render_codebook(model), render_confusion(model)])
+        return ToolResult(message=message, image=image, details=details, preview_only=True)
 
 
 class BowHistogramTool(ForensicsTool):

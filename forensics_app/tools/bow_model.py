@@ -41,7 +41,10 @@ ASSIGNMENTS = ("hard", "soft")
 WEIGHTINGS = ("tf", "tfidf")
 NORMS = ("l1", "l2")
 MODEL_VERSION = 1
-DEFAULT_MODEL_PATH = Path("models") / "bow_model.joblib"
+# Per-user location, independent of the folder the app is started from. Loading a model
+# unpickles it (it can run code), so it must never be picked up from a folder that may
+# hold untrusted material, such as a downloaded evidence folder.
+DEFAULT_MODEL_PATH = Path.home() / ".forensics_app" / "models" / "bow_model.joblib"
 
 # Dense DAISY grid: one descriptor every DENSE_STEP pixels, with
 # (rings x histograms + 1) x orientations = 104 values
@@ -53,6 +56,7 @@ DENSE_ORIENTATIONS = 8
 # Regularisation values tried for the SVM (chosen by cross-validation on train)
 SVM_C_GRID = (0.1, 1.0, 10.0, 100.0)
 CV_FOLDS = 5
+MIN_TRAIN_PER_CLASS = 2
 EXEMPLARS_PER_WORD = 5
 PATCH_SIDE = 32
 NEIGHBOURS = 5
@@ -170,6 +174,15 @@ def split_dataset(
     train_p, test_p, train_y, test_y = train_test_split(
         paths, labels, test_size=n_test, stratify=labels, random_state=seed
     )
+    # the SVM's C and its probability calibration use stratified folds: every class
+    # needs at least two training images or those folds cannot be built
+    per_class = np.bincount(train_y, minlength=len(dataset))
+    short = [name for name, count in zip(dataset, per_class) if count < MIN_TRAIN_PER_CLASS]
+    if short:
+        raise ValueError(
+            f"After keeping {test_ratio:.0%} of the images for testing, these classes have fewer than "
+            f"{MIN_TRAIN_PER_CLASS} training images: {', '.join(short)}. Add images or lower the test ratio."
+        )
     return list(train_p), list(train_y), list(test_p), list(test_y)
 
 
@@ -479,16 +492,30 @@ class BowModel:
     def k(self) -> int:
         return len(self.centers)
 
-    def save(self, path: str | Path = DEFAULT_MODEL_PATH) -> Path:
-        path = Path(path)
+    def save(self, path: str | Path | None = None) -> Path:
+        """Write the model to ``path`` (default: DEFAULT_MODEL_PATH), reload it and check it.
+
+        Raises OSError if the file cannot be written and ValueError if what was read
+        back does not match, so a silently broken save is caught straight away.
+        """
+        path = Path(path) if path is not None else DEFAULT_MODEL_PATH
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {item.name: getattr(self, item.name) for item in fields(self)}
         joblib.dump(payload, path)
+        stored = BowModel.load(path)
+        if stored.classes != self.classes or not np.array_equal(stored.centers, self.centers):
+            raise ValueError(f"The model saved to '{path}' does not match the trained one.")
         return path
 
     @classmethod
-    def load(cls, path: str | Path = DEFAULT_MODEL_PATH) -> BowModel:
-        payload = joblib.load(Path(path))
+    def load(cls, path: str | Path | None = None) -> BowModel:
+        """Read a model saved by ``save``.
+
+        joblib unpickles the file, which can execute code: only load model files that
+        this app created, never one received from someone else or found in evidence.
+        """
+        path = Path(path) if path is not None else DEFAULT_MODEL_PATH
+        payload = joblib.load(path)
         if not isinstance(payload, dict) or payload.get("version") != MODEL_VERSION:
             raise ValueError(f"'{path}' is not a BoW model saved by this version of the app.")
         return cls(**payload)
@@ -509,7 +536,11 @@ def _extract_all(
     for index, path in enumerate(paths):
         _check(cancelled)
         report(offset + index, total, f"Extracting features: {path.parent.name}/{path.name}")
-        found, gray = extract_features(load_image(path), settings)
+        try:
+            image = load_image(path)
+        except OSError as error:  # includes PIL's UnidentifiedImageError
+            raise ValueError(f"Could not read '{path}': {error}. Remove or replace this file.") from error
+        found, gray = extract_features(image, settings)
         features.append(found)
         grays.append(np.asarray(gray, dtype=np.uint8))
     return features, grays
