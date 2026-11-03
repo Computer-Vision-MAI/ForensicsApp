@@ -23,6 +23,7 @@ from .corner_detection import CornerDetectionTool
 from .keypoint_detection import KeypointDetectionTool
 from .feature_matching import FeatureMatchingTool
 from .image_lookup import ImageLookupTool
+from .bow_tools import BowClassifyTool, BowCodebookTool, BowHistogramTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -48,6 +49,9 @@ def build_tool_registry() -> ToolRegistry:
             KeypointDetectionTool(),
             FeatureMatchingTool(),
             ImageLookupTool(),
+            BowCodebookTool(),
+            BowHistogramTool(),
+            BowClassifyTool(),
         ]
     )
 
@@ -60,4 +64,7 @@ __all__ = [
     "KeypointDetectionTool",
     "FeatureMatchingTool",
     "ImageLookupTool",
+    "BowCodebookTool",
+    "BowHistogramTool",
+    "BowClassifyTool",
 ]
