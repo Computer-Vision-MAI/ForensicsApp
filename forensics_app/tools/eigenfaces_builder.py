@@ -28,21 +28,35 @@ from .face_recognition_core import (
 class EigenfacesDialog(simpledialog.Dialog):
     """Configuration dialog for the Eigenface Builder tool."""
 
-    def __init__(self, parent: tk.Misc, model_exists: bool) -> None:
+    def __init__(
+        self,
+        parent: tk.Misc,
+        model_exists: bool,
+        existing_components: int | None = None,
+        existing_variance: float | None = None,
+    ) -> None:
         self._model_exists = model_exists
+        self._existing_components = existing_components
+        self._existing_variance = existing_variance
         self.k: int = 16
-        self.n_components: int = 150
+        # If an existing model is on disk, suggest its component count; otherwise default to 150
+        self.n_components: int = existing_components if existing_components is not None else 150
         self.retrain: bool = not model_exists
         self.user_confirmed = False
         super().__init__(parent, "Eigenface Builder (Set 6.2)")
 
     def body(self, master: tk.Frame) -> tk.Widget:
         # Information banner
-        status_text = (
-            "Model found on disk (ready to visualize)."
-            if self._model_exists
-            else "No model found. It will be trained on the LFW face dataset."
-        )
+        if self._existing_components is not None:
+            status_text = (
+                f"Model found on disk: {self._existing_components} components "
+                f"({self._existing_variance:.1f}% total variance stored)."
+            )
+        elif self._model_exists:
+            status_text = "Model found on disk (ready to visualize)."
+        else:
+            status_text = "No model found on disk. It will be trained on the LFW face dataset."
+
         info_frame = ttk.LabelFrame(master, text="Dataset & Model Status", padding=8)
         info_frame.pack(fill="x", padx=6, pady=6)
         ttk.Label(info_frame, text=status_text, foreground="#2b5797").pack(anchor="w")
@@ -67,7 +81,7 @@ class EigenfacesDialog(simpledialog.Dialog):
         ttk.Label(params_frame, text="Total PCA components:").grid(
             row=1, column=0, sticky="w", pady=4
         )
-        self._comp_var = tk.StringVar(master, value="150")
+        self._comp_var = tk.StringVar(master, value=str(self.n_components))
         self._comp_entry = ttk.Entry(params_frame, textvariable=self._comp_var, width=10)
         self._comp_entry.grid(row=1, column=1, sticky="w", padx=6, pady=4)
 
@@ -125,7 +139,19 @@ class EigenfacesBuilderTool(ForensicsTool):
     def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult | None:
         # Check whether a trained model currently exists
         existing_model = load_face_model(DEFAULT_MODEL_DIR)
-        dialog = EigenfacesDialog(parent, model_exists=(existing_model is not None))
+        existing_comps = len(existing_model.eigenfaces) if existing_model else None
+        existing_var = (
+            float(np.sum(existing_model.explained_variance_ratio) * 100.0)
+            if existing_model
+            else None
+        )
+
+        dialog = EigenfacesDialog(
+            parent,
+            model_exists=(existing_model is not None),
+            existing_components=existing_comps,
+            existing_variance=existing_var,
+        )
 
         if not dialog.user_confirmed:
             return None
@@ -134,8 +160,11 @@ class EigenfacesBuilderTool(ForensicsTool):
         n_comp = dialog.n_components
         retrain = dialog.retrain
 
-        # Train or load model
-        if retrain or existing_model is None or len(existing_model.eigenfaces) < k:
+        # Train or load model:
+        # Retrain if user checked Force re-train, if no model exists, OR if the stored model
+        # has fewer components than requested (e.g. 100 on disk, but 150 requested).
+        need_retrain = retrain or existing_model is None or len(existing_model.eigenfaces) < n_comp
+        if need_retrain:
             model = train_eigenfaces_model(
                 n_components=n_comp,
                 data_dir=DEFAULT_DATA_DIR,
@@ -147,17 +176,22 @@ class EigenfacesBuilderTool(ForensicsTool):
         # Build square grid visualization of the first K eigenfaces
         grid_image = make_eigenfaces_grid(model.eigenfaces, k=k)
 
-        # Explained variance for top K
+        # Distinguish the three variance metrics:
+        # 1. Top K: the variance of the eigenfaces currently displayed on screen.
+        # 2. Active Subspace: the variance of the n_components requested by the user.
+        # 3. Total Stored: the overall variance of all components stored in the model on disk.
+        active_n = min(n_comp, len(model.eigenfaces))
         top_k_var = float(np.sum(model.explained_variance_ratio[:k]) * 100.0)
-        total_var = float(np.sum(model.explained_variance_ratio) * 100.0)
+        active_var = float(np.sum(model.explained_variance_ratio[:active_n]) * 100.0)
+        total_stored_var = float(np.sum(model.explained_variance_ratio) * 100.0)
+        total_stored_n = len(model.eigenfaces)
 
         mean_faces_path = DEFAULT_MODEL_DIR / "mean_faces"
 
         details = {
-            "Total Principal Components": len(model.eigenfaces),
-            "Visualized Eigenfaces (K)": k,
-            "Explained Variance (Top K)": f"{top_k_var:.2f}%",
-            "Explained Variance (All)": f"{total_var:.2f}%",
+            "Visualized Eigenfaces (K)": f"{k}  ({top_k_var:.2f}% variance)",
+            "Active Subspace Components": f"{active_n}  ({active_var:.2f}% variance)",
+            "Total Components Stored": f"{total_stored_n}  ({total_stored_var:.2f}% variance)",
             "Training Faces": len(model.X_train_pca),
             "Classes": len(model.target_names),
             "Mean Faces Directory": str(mean_faces_path),
@@ -170,8 +204,9 @@ class EigenfacesBuilderTool(ForensicsTool):
             document.current = grid_image.copy()
 
         message = (
-            f"Eigenfaces model ready! Visualizing top {k} eigenfaces "
-            f"({top_k_var:.1f}% explained variance). Mean faces saved to {mean_faces_path.name}/."
+            f"Eigenfaces model ready! Visualizing top {k} eigenfaces ({top_k_var:.1f}% variance). "
+            f"Active subspace: {active_n} components ({active_var:.1f}% variance). "
+            f"Model on disk: {total_stored_n} components ({total_stored_var:.1f}% variance)."
         )
 
         return ToolResult(

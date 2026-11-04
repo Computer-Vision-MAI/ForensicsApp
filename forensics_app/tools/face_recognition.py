@@ -318,11 +318,13 @@ class FaceRecognitionTool(ForensicsTool):
         )
 
         method_str = "FisherFaces (PCA + LDA)" if use_lda else "EigenFaces (PCA)"
+        k_var = float(np.sum(model.explained_variance_ratio[:k]) * 100.0)
         details: dict[str, Any] = {
             "Predicted Identity": pred_name,
             "Classification Result": verdict_str,
             "Representation": method_str,
-            "Eigenfaces Used (k)": k,
+            "Eigenfaces Used (k)": f"{k} ({k_var:.2f}% explained variance)",
+            "Model Components Available": len(model.eigenfaces),
             "Neighbors Examined (m)": m,
             "Decision Rule": strategy_info["type"],
         }

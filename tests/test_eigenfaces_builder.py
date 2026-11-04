@@ -95,8 +95,9 @@ class TestEigenfacesBuilder(unittest.TestCase):
         self.assertTrue(result.preview_only)
         self.assertIsNotNone(result.image)
         self.assertIn("Visualized Eigenfaces (K)", result.details)
-        self.assertEqual(result.details["Visualized Eigenfaces (K)"], 8)
-        self.assertIn("Explained Variance (Top K)", result.details)
+        self.assertIn("8", result.details["Visualized Eigenfaces (K)"])
+        self.assertIn("Active Subspace Components", result.details)
+        self.assertIn("Total Components Stored", result.details)
 
 
 if __name__ == "__main__":
