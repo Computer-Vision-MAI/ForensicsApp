@@ -74,7 +74,57 @@ def prepare_lfw_dataset(
         except Exception:
             pass
 
-    # Download or retrieve cached dataset
+    train_dir = data_dir / "train"
+    test_dir = data_dir / "test"
+
+    # If images already exist on disk in train/ and test/, index them directly without calling fetch_lfw_people
+    if train_dir.exists() and any(train_dir.glob("*.png")):
+        train_files = sorted(list(train_dir.glob("*.png")))
+        test_files = sorted(list(test_dir.glob("*.png"))) if test_dir.exists() else []
+
+        # Extract person names from filenames: train_XXXX_Person_Name.png
+        target_names_set: set[str] = set()
+        for f in train_files:
+            parts = f.stem.split("_", 2)
+            if len(parts) >= 3:
+                target_names_set.add(parts[2].replace("_", " "))
+        target_names = sorted(list(target_names_set))
+        name_to_label = {name: idx for idx, name in enumerate(target_names)}
+
+        with Image.open(train_files[0]) as sample_img:
+            h, w = sample_img.height, sample_img.width
+
+        def _index_files(files: list[Path]) -> list[dict[str, Any]]:
+            items: list[dict[str, Any]] = []
+            for f in files:
+                parts = f.stem.split("_", 2)
+                p_name = parts[2].replace("_", " ") if len(parts) >= 3 else "Unknown"
+                items.append(
+                    {
+                        "path": str(f),
+                        "filename": f.name,
+                        "label": name_to_label.get(p_name, 0),
+                        "name": p_name,
+                    }
+                )
+            return items
+
+        meta = {
+            "target_names": target_names,
+            "n_classes": len(target_names),
+            "img_shape": [h, w],
+            "train": _index_files(train_files),
+            "test": _index_files(test_files),
+        }
+        try:
+            with open(metadata_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2)
+        except Exception:
+            pass
+        return meta
+
+    # Initial fallback only if no dataset images exist on disk:
+    # Fetch LFW via scikit-learn helper, partition into 75% train / 25% test, and export to PNG files
     lfw = fetch_lfw_people(min_faces_per_person=min_faces_per_person, resize=resize)
     x_all = lfw.data  # (N, D)
     y_all = lfw.target  # (N,)
@@ -87,8 +137,6 @@ def prepare_lfw_dataset(
         x_all, y_all, test_size=0.25, random_state=42
     )
 
-    train_dir = data_dir / "train"
-    test_dir = data_dir / "test"
     train_dir.mkdir(parents=True, exist_ok=True)
     test_dir.mkdir(parents=True, exist_ok=True)
 
