@@ -24,6 +24,7 @@ from .keypoint_detection import KeypointDetectionTool
 from .feature_matching import FeatureMatchingTool
 from .image_lookup import ImageLookupTool
 from .face_detection import FaceDetectionTool
+from .webcam_capture import WebcamCaptureTool
 from .eigenfaces_builder import EigenfacesBuilderTool
 from .face_recognition import FaceRecognitionTool
 
@@ -52,6 +53,7 @@ def build_tool_registry() -> ToolRegistry:
             FeatureMatchingTool(),
             ImageLookupTool(),
             FaceDetectionTool(),
+            WebcamCaptureTool(),
             EigenfacesBuilderTool(),
             FaceRecognitionTool(),
         ]
@@ -67,6 +69,7 @@ __all__ = [
     "FeatureMatchingTool",
     "ImageLookupTool",
     "FaceDetectionTool",
+    "WebcamCaptureTool",
     "EigenfacesBuilderTool",
     "FaceRecognitionTool",
 ]
