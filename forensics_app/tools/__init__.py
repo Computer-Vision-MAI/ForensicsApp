@@ -23,6 +23,9 @@ from .corner_detection import CornerDetectionTool
 from .keypoint_detection import KeypointDetectionTool
 from .feature_matching import FeatureMatchingTool
 from .image_lookup import ImageLookupTool
+from .face_detection import FaceDetectionTool
+from .eigenfaces_builder import EigenfacesBuilderTool
+from .face_recognition import FaceRecognitionTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -48,6 +51,9 @@ def build_tool_registry() -> ToolRegistry:
             KeypointDetectionTool(),
             FeatureMatchingTool(),
             ImageLookupTool(),
+            FaceDetectionTool(),
+            EigenfacesBuilderTool(),
+            FaceRecognitionTool(),
         ]
     )
 
@@ -60,4 +66,7 @@ __all__ = [
     "KeypointDetectionTool",
     "FeatureMatchingTool",
     "ImageLookupTool",
+    "FaceDetectionTool",
+    "EigenfacesBuilderTool",
+    "FaceRecognitionTool",
 ]
