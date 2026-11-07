@@ -16,7 +16,7 @@ without a display and run on a worker thread.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 import time
 
@@ -25,7 +25,7 @@ import numpy as np
 from PIL import Image
 from skimage import feature
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.cluster import MiniBatchKMeans
+from sklearn.cluster import KMeans
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from sklearn.metrics.pairwise import additive_chi2_kernel, euclidean_distances
 from sklearn.model_selection import StratifiedKFold, train_test_split
@@ -57,6 +57,8 @@ DENSE_ORIENTATIONS = 8
 SVM_C_GRID = (0.1, 1.0, 10.0, 100.0)
 CV_FOLDS = 5
 MIN_TRAIN_PER_CLASS = 2
+# skimage's SIFT crashes on images 5 px wide or less; below 16 px no descriptor window fits anyway
+MIN_SIFT_SIDE = 16
 EXEMPLARS_PER_WORD = 5
 PATCH_SIDE = 32
 NEIGHBOURS = 5
@@ -221,6 +223,8 @@ def extract_features(img: Image.Image, settings: BowSettings) -> tuple[LocalFeat
     shape = (gray.height, gray.width)
     dim = descriptor_size(settings.detector)
     if settings.detector == "sift":
+        if min(shape) < MIN_SIFT_SIDE:
+            return _empty_features(shape, dim), gray
         keypoints, descriptors, sigmas, _ = extract_keypoints(gray, method="sift", return_meta=True)
         if descriptors is None or len(keypoints) == 0:
             return _empty_features(shape, dim), gray # it gives zeros in a future histogram, which is better than failing
@@ -260,15 +264,17 @@ def _empty_features(shape: tuple[int, int], dim: int) -> LocalFeatures:
 def build_codebook(descriptors: np.ndarray, k: int, seed: int = 0, max_samples: int = 100_000) -> np.ndarray:
     """Cluster descriptors with K-Means and return the K centroids (the visual words).
 
-    At most ``max_samples`` random descriptors are used, which keeps K-Means fast
-    without changing the result much.
+    Standard (Lloyd) K-Means, as in the theory: assign every point to its nearest centre,
+    move every centre to the mean of its points, repeat. ``n_init=3`` runs it from three
+    k-means++ starts and keeps the best one, which avoids poor local minima. At most
+    ``max_samples`` random descriptors are used, which keeps it fast (about 5 s for K = 30).
     """
     if len(descriptors) < k:
         raise ValueError(f"Only {len(descriptors)} descriptors were found, fewer than K = {k}.")
     rng = np.random.default_rng(seed)
     if len(descriptors) > max_samples:
         descriptors = descriptors[rng.choice(len(descriptors), max_samples, replace=False)]
-    kmeans = MiniBatchKMeans(n_clusters=k, random_state=seed, n_init=3, batch_size=2048)
+    kmeans = KMeans(n_clusters=k, random_state=seed, n_init=3)
     kmeans.fit(descriptors)
     return kmeans.cluster_centers_.astype(np.float32)
 
@@ -379,8 +385,17 @@ def chi2_distances(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 
 def chi2_gamma(distances: np.ndarray) -> float:
-    """Kernel width = 1 / mean chi-squared distance between training histograms (Zhang et al. 2007)."""
-    mean = float(distances.mean())
+    """Kernel width = 1 / mean chi-squared distance between training histograms (Zhang et al. 2007).
+
+    For a square train x train matrix the diagonal (each image against itself, always 0)
+    is left out of the mean: only distances between different images count.
+    """
+    distances = np.asarray(distances, dtype=np.float64)
+    n = distances.shape[0]
+    if distances.ndim == 2 and distances.shape == (n, n) and n > 1:
+        mean = float((distances.sum() - np.trace(distances)) / (n * (n - 1)))
+    else:
+        mean = float(distances.mean())
     return 1.0 / mean if mean > 0 else 1.0
 
 
@@ -515,10 +530,18 @@ class BowModel:
         this app created, never one received from someone else or found in evidence.
         """
         path = Path(path) if path is not None else DEFAULT_MODEL_PATH
-        payload = joblib.load(path)
+        try:
+            payload = joblib.load(path)
+        except FileNotFoundError:
+            raise
+        except Exception as error:  # truncated or foreign file: unpickling can fail in many ways
+            raise ValueError(f"Could not read the BoW model '{path}': {error}. Build the codebook again.") from error
         if not isinstance(payload, dict) or payload.get("version") != MODEL_VERSION:
             raise ValueError(f"'{path}' is not a BoW model saved by this version of the app.")
-        return cls(**payload)
+        try:
+            return cls(**payload)
+        except TypeError as error:  # missing or unexpected fields
+            raise ValueError(f"'{path}' is not a complete BoW model: {error}.") from error
 
 
 # --------------------------------------------------------------------------- training
@@ -566,7 +589,15 @@ def _vectors_for(
     """Soft width, IDF and classifier vectors of the training images for one codebook."""
     sigma = _soft_sigma(train_descriptors, centers, settings)
     counts = _encode_all(features, centers, settings, sigma)
-    idf = idf_weights(counts) if settings.weighting == "tfidf" else None
+    idf = None
+    if settings.weighting == "tfidf":
+        # A word is "present" in an image when it is the nearest word of at least one of
+        # its features. Soft votes give every word a little weight in every image, so
+        # counting them would make all words present everywhere and the IDF useless.
+        presence = counts
+        if settings.assignment == "soft":
+            presence = _encode_all(features, centers, replace(settings, assignment="hard"), sigma)
+        idf = idf_weights(presence)
     return sigma, idf, to_vectors(counts, settings, idf)
 
 
@@ -602,7 +633,8 @@ def choose_k_by_cv(
 def _crop_patch(gray: np.ndarray, row: float, col: float, radius: float) -> np.ndarray:
     r = int(round(radius))
     padded = np.pad(gray, r, mode="edge")
-    top, left = int(round(row)), int(round(col))
+    top = min(max(int(round(row)), 0), gray.shape[0] - 1)
+    left = min(max(int(round(col)), 0), gray.shape[1] - 1)
     patch = padded[top : top + 2 * r + 1, left : left + 2 * r + 1]
     return np.asarray(Image.fromarray(patch).resize((PATCH_SIDE, PATCH_SIDE), Image.Resampling.BILINEAR))
 
@@ -654,7 +686,8 @@ def word_exemplars(
 
 def evaluate(classifier: Chi2Svm, vectors: np.ndarray, labels: np.ndarray, classes: list[str]) -> dict[str, object]:
     """Accuracy, confusion matrix (rows = true class) and per-class precision/recall on test."""
-    predicted = classifier.predict_proba(vectors).argmax(axis=1)
+    # column j of predict_proba is the class classifier.classes_[j]
+    predicted = classifier.classes_[classifier.predict_proba(vectors).argmax(axis=1)]
     report = classification_report(
         labels, predicted, labels=list(range(len(classes))), target_names=classes, output_dict=True, zero_division=0
     )
@@ -772,8 +805,19 @@ def describe_image(model: BowModel, img: Image.Image, path: str | Path | None = 
     return ImageAnalysis(gray, features, words, frequency, vector, neighbours, image_split(model, path))
 
 
+def require_features(analysis: ImageAnalysis) -> None:
+    """Raise ValueError for an image without local features: its histogram is empty,
+    so any prediction would be meaningless."""
+    if len(analysis.features) == 0:
+        raise ValueError(
+            "No local features were found in this image (it is flat or too small), "
+            "so its histogram is empty and it cannot be classified."
+        )
+
+
 def classify(model: BowModel, analysis: ImageAnalysis) -> list[tuple[str, float]]:
     """Run the trained classifier: (class, probability) sorted from most to least likely."""
+    require_features(analysis)
     probabilities = model.classifier.predict_proba(analysis.vector[None, :])[0]
     labels = model.classifier.classes_
     ranked = sorted(zip(labels, probabilities), key=lambda item: -item[1])

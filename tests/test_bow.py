@@ -393,6 +393,28 @@ class PipelineTests(unittest.TestCase):
         self.assertNotIn("Warning", result.details)
         self.assertTrue(result.details["Data split"].startswith("TEST"))
 
+    def test_images_without_features_are_not_classified(self) -> None:
+        bm.set_model(self.model)
+        document = ImageDocument()
+        document.current = Image.new("L", (20, 20), 128)  # smaller than one DAISY descriptor
+        analysis = bm.describe_image(self.model, document.current)
+        self.assertEqual(len(analysis.features), 0)
+        with self.assertRaisesRegex(ValueError, "cannot be classified"):
+            bm.classify(self.model, analysis)
+        histogram = BowHistogramTool().run(None, document)  # still shows the (empty) histogram
+        self.assertIn("No local features", histogram.message)
+        with patch("forensics_app.tools.bow_tools.show_classify_window") as window, \
+             self.assertRaisesRegex(ValueError, "cannot be classified"):
+            BowClassifyTool().run(object(), document)
+        window.assert_not_called()  # the error comes before the window opens
+
+    def test_evaluate_matches_classify(self) -> None:
+        vectors = self.model.classifier.train_vectors[:5]
+        metrics = bm.evaluate(self.model.classifier, vectors, self.model.train_labels[:5], self.model.classes)
+        probabilities = self.model.classifier.predict_proba(vectors)
+        expected = self.model.classifier.classes_[probabilities.argmax(axis=1)]
+        self.assertAlmostEqual(metrics["accuracy"], float(np.mean(expected == self.model.train_labels[:5])))
+
     def test_classify_window_closed_means_cancel(self) -> None:
         bm.set_model(self.model)
         document = ImageDocument()
@@ -432,6 +454,62 @@ class PipelineTests(unittest.TestCase):
         ids = [tool.tool_id for tool in build_tool_registry().all()]
         for tool_id in ("bow_codebook", "bow_histogram", "bow_classify"):
             self.assertIn(tool_id, ids)
+
+
+class ReviewFixesTests(unittest.TestCase):
+    """Regression tests for problems found while reviewing the BoW core."""
+
+    def test_kmeans_finds_obvious_groups_for_every_seed(self) -> None:
+        # MiniBatchKMeans split the group near (0, 0) and merged the other two with seed 0
+        points = np.array([[0, 0], [1, 0], [0, 1], [9, 9], [9, 10], [10, 9], [0, 1], [20, 0], [19, 1]], np.float32)
+        for seed in range(5):
+            with self.subTest(seed=seed):
+                centers = bm.build_codebook(points, 3, seed=seed)
+                for expected in ([0.25, 0.5], [9.33, 9.33], [19.5, 0.5]):
+                    self.assertLess(np.linalg.norm(centers - expected, axis=1).min(), 0.1)
+
+    def test_gamma_ignores_the_zero_diagonal(self) -> None:
+        distances = np.array([[0.0, 1.0, 3.0], [1.0, 0.0, 2.0], [3.0, 2.0, 0.0]])
+        self.assertAlmostEqual(bm.chi2_gamma(distances), 1 / 2.0)  # mean of 1, 3, 2 (not 12/9)
+        self.assertAlmostEqual(bm.chi2_gamma(np.array([[2.0, 4.0]])), 1 / 3.0)  # not square: plain mean
+
+    def test_idf_still_works_with_soft_assignment(self) -> None:
+        centers = np.array([[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]])
+        def image(descriptors: list[list[float]]) -> bm.LocalFeatures:
+            d = np.array(descriptors, np.float32)
+            return bm.LocalFeatures(np.full((len(d), 2), 5.0), np.ones(len(d)), d, (10, 10))
+        # word 0 in every image, word 2 in only one
+        features = [image([[0, 0], [10, 0]]), image([[1, 0], [9, 0]]), image([[0, 1], [0, 10]])]
+        descriptors = np.vstack([f.descriptors for f in features])
+        settings = bm.BowSettings(assignment="soft", soft_sigma=5.0, pyramid_levels=0)
+        _, idf, _ = bm._vectors_for(features, centers, settings, descriptors)
+        self.assertLess(idf[0], idf[2])  # soft votes reach every word, presence must not
+        hard = bm._vectors_for(features, centers, bm.BowSettings(pyramid_levels=0), descriptors)[1]
+        np.testing.assert_allclose(idf, hard)
+
+    def test_tiny_images_give_no_features_instead_of_crashing(self) -> None:
+        for size in ((1, 1), (5, 5), (3, 200), (15, 40)):
+            for detector in ("sift", "dense"):
+                with self.subTest(size=size, detector=detector):
+                    image = Image.fromarray((np.random.default_rng(0).random(size) * 255).astype(np.uint8))
+                    features, _ = bm.extract_features(image, bm.BowSettings(detector=detector))
+                    self.assertEqual(len(features), 0)
+
+    def test_crop_patch_at_the_border_stays_square(self) -> None:
+        gray = np.arange(100, dtype=np.uint8).reshape(10, 10)
+        for row, col in ((9.6, 9.6), (-0.4, 0.0), (0.0, 9.9)):
+            self.assertEqual(bm._crop_patch(gray, row, col, 3).shape, (bm.PATCH_SIDE, bm.PATCH_SIDE))
+
+    def test_load_reports_unreadable_or_incomplete_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            broken = Path(tmp) / "broken.joblib"
+            broken.write_bytes(b"this is not a model")
+            with self.assertRaisesRegex(ValueError, "Could not read the BoW model"):
+                bm.BowModel.load(broken)
+            partial = Path(tmp) / "partial.joblib"
+            bm.joblib.dump({"version": bm.MODEL_VERSION, "classes": ["a"]}, partial)
+            with self.assertRaisesRegex(ValueError, "not a complete BoW model"):
+                bm.BowModel.load(partial)
 
 
 if __name__ == "__main__":

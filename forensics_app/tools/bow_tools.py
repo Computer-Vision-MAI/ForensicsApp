@@ -21,6 +21,7 @@ from .bow_model import (
     classify,
     describe_image,
     get_model,
+    require_features,
     set_model,
     train_bow_model,
 )
@@ -167,6 +168,8 @@ class BowHistogramTool(ForensicsTool):
         if neighbours is not None:
             parts.append(neighbours)
         message = f"Histogram of {model.k} visual words from {len(analysis.features)} features."
+        if len(analysis.features) == 0:
+            message = "No local features found (flat or too small image): the histogram is empty."
         if analysis.in_train:
             message += " Warning: this is a training image."
         return ToolResult(
@@ -187,6 +190,7 @@ class BowClassifyTool(ForensicsTool):
         assert document.current is not None
         model = get_model()
         analysis = describe_image(model, document.current, document.path)
+        require_features(analysis)  # fail here, with the app's error dialog, not inside the window
         title = _image_title(document, analysis)
         histogram = render_word_histogram(document.current, analysis, model, title, warn=analysis.in_train)
 
