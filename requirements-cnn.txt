@@ -1,0 +1,7 @@
+# Optional: CNN features for the Set 7 bonus (Bonus: Compare BoW vs CNN).
+# The app and the tests work without these packages.
+# CPU-only wheels: the default PyPI build for Linux bundles CUDA and weighs several GB.
+#   .venv/bin/pip install -r requirements-cnn.txt
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.2
+torchvision>=0.17

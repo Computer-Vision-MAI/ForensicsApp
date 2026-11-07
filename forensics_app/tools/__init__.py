@@ -24,6 +24,7 @@ from .keypoint_detection import KeypointDetectionTool
 from .feature_matching import FeatureMatchingTool
 from .image_lookup import ImageLookupTool
 from .bow_tools import BowClassifyTool, BowCodebookTool, BowHistogramTool
+from .cnn_tools import CnnCompareTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -52,6 +53,7 @@ def build_tool_registry() -> ToolRegistry:
             BowCodebookTool(),
             BowHistogramTool(),
             BowClassifyTool(),
+            CnnCompareTool(),
         ]
     )
 
@@ -67,4 +69,5 @@ __all__ = [
     "BowCodebookTool",
     "BowHistogramTool",
     "BowClassifyTool",
+    "CnnCompareTool",
 ]
