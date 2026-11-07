@@ -81,11 +81,33 @@ class SettingsAndDatasetTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "two class subfolders"):
                 bm.list_dataset(tmp)
 
-    def test_split_rejects_classes_left_with_one_training_image(self) -> None:
+    def test_split_rejects_a_class_without_test_images(self) -> None:
         dataset = {"big": [Path(f"big/{i}.png") for i in range(10)], "tiny": [Path("tiny/0.png"), Path("tiny/1.png")]}
-        bm.split_dataset(dataset, 0.2, seed=0)  # 20 %: both tiny images stay in train
+        # 20 %: both tiny images would stay in train, so the test would never see that class
+        with self.assertRaisesRegex(ValueError, "no image of these classes is kept for testing: tiny"):
+            bm.split_dataset(dataset, 0.2, seed=0)
+
+    def test_split_rejects_a_class_left_with_one_training_image(self) -> None:
+        dataset = {"big": [Path(f"big/{i}.png") for i in range(10)], "tiny": [Path("tiny/0.png"), Path("tiny/1.png")]}
         with self.assertRaisesRegex(ValueError, "fewer than 2 training images: tiny"):
             bm.split_dataset(dataset, 0.5, seed=0)  # 50 %: one tiny image goes to test
+
+    def test_split_keeps_every_class_in_train_and_test(self) -> None:
+        dataset = {"big": [Path(f"big/{i}.png") for i in range(10)], "tiny": [Path(f"tiny/{i}.png") for i in range(3)]}
+        for ratio in (0.2, 0.3, 0.5):
+            with self.subTest(ratio=ratio):
+                _, train_y, _, test_y = bm.split_dataset(dataset, ratio, seed=0)
+                self.assertGreaterEqual(np.bincount(train_y, minlength=2).min(), bm.MIN_TRAIN_PER_CLASS)
+                self.assertGreaterEqual(np.bincount(test_y, minlength=2).min(), bm.MIN_TEST_PER_CLASS)
+
+    def test_list_dataset_needs_three_images_per_class(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            for kind, count in (("dots", 3), ("stripes", 2)):
+                (Path(tmp) / kind).mkdir()
+                for index in range(count):
+                    texture(kind, index).save(Path(tmp) / kind / f"{index}.png")
+            with self.assertRaisesRegex(ValueError, "at least 3 images .*too few in: stripes"):
+                bm.list_dataset(tmp)
 
     def test_default_model_path_does_not_depend_on_the_working_folder(self) -> None:
         self.assertTrue(bm.DEFAULT_MODEL_PATH.is_absolute())
@@ -262,7 +284,7 @@ class PipelineTests(unittest.TestCase):
     def test_exemplars_come_from_training_images(self) -> None:
         train_names = {Path(p).name for p in self.model.train_paths}
         for exemplar in self.model.exemplars:
-            self.assertTrue(set(exemplar.sources) <= train_names)
+            self.assertLessEqual(set(exemplar.sources), train_names)
             self.assertEqual(exemplar.patches.shape[1:], (bm.PATCH_SIDE, bm.PATCH_SIDE))
             if exemplar.class_share.sum():
                 self.assertAlmostEqual(exemplar.class_share.sum(), 1)
@@ -403,9 +425,10 @@ class PipelineTests(unittest.TestCase):
             bm.classify(self.model, analysis)
         histogram = BowHistogramTool().run(None, document)  # still shows the (empty) histogram
         self.assertIn("No local features", histogram.message)
+        tool, parent = BowClassifyTool(), object()
         with patch("forensics_app.tools.bow_tools.show_classify_window") as window, \
              self.assertRaisesRegex(ValueError, "cannot be classified"):
-            BowClassifyTool().run(object(), document)
+            tool.run(parent, document)
         window.assert_not_called()  # the error comes before the window opens
 
     def test_evaluate_matches_classify(self) -> None:

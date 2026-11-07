@@ -36,6 +36,7 @@ from sklearn.svm import SVC
 from .bow_model import (
     CV_FOLDS,
     SVM_C_GRID,
+    UNUSED_SVC_GAMMA,
     BowModel,
     Cancelled,
     Report,
@@ -191,12 +192,12 @@ def train_embedding_classifier(
     scores = {c: [] for c in c_grid}
     for fit_idx, val_idx in splitter.split(vectors, labels):
         for c in c_grid:
-            svc = SVC(kernel="linear", C=c, class_weight="balanced")
+            svc = SVC(kernel="linear", C=c, gamma=UNUSED_SVC_GAMMA, class_weight="balanced")
             svc.fit(vectors[fit_idx], labels[fit_idx])
             scores[c].append(accuracy_score(labels[val_idx], svc.predict(vectors[val_idx])))
     best = max(c_grid, key=lambda c: (np.mean(scores[c]), -c))
     calibrated = CalibratedClassifierCV(
-        SVC(kernel="linear", C=best, class_weight="balanced"),
+        SVC(kernel="linear", C=best, gamma=UNUSED_SVC_GAMMA, class_weight="balanced"),
         method="sigmoid",
         ensemble=False,
         cv=StratifiedKFold(n_splits=folds, shuffle=True, random_state=seed),

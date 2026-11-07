@@ -74,8 +74,9 @@ class PreprocessTests(unittest.TestCase):
                 self.assertEqual(cf.preprocess(image).shape, (3, cf.CROP_SIDE, cf.CROP_SIDE))
 
     def test_empty_image_is_rejected(self) -> None:
+        empty = Image.new("RGB", (0, 0))
         with self.assertRaisesRegex(ValueError, "empty"):
-            cf.preprocess(Image.new("RGB", (0, 0)))
+            cf.preprocess(empty)
 
 
 class EmbeddingTests(unittest.TestCase):
@@ -173,16 +174,18 @@ class ComparisonTests(unittest.TestCase):
         self.assertGreater(image.width, 500)
 
     def test_tool_without_pytorch_explains_how_to_install(self) -> None:
+        tool, document = CnnCompareTool(), ImageDocument()
         with patch("forensics_app.tools.cnn_tools.torch_available", return_value=False), \
              self.assertRaisesRegex(ValueError, "requirements-cnn.txt"):
-            CnnCompareTool().run(None, ImageDocument())
+            tool.run(None, document)
 
     def test_tool_without_bow_model(self) -> None:
+        tool, document = CnnCompareTool(), ImageDocument()
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(bm, "DEFAULT_MODEL_PATH", Path(tmp) / "missing.joblib"), \
              patch("forensics_app.tools.cnn_tools.torch_available", return_value=True), \
              self.assertRaisesRegex(ValueError, "Build Codebook"):
-            CnnCompareTool().run(None, ImageDocument())
+            tool.run(None, document)
 
     def test_tool_compares_and_classifies_the_open_image(self) -> None:
         bm.set_model(self.model)

@@ -16,7 +16,7 @@ without a display and run on a worker thread.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field, fields, replace
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 import time
 
@@ -56,7 +56,12 @@ DENSE_ORIENTATIONS = 8
 # Regularisation values tried for the SVM (chosen by cross-validation on train)
 SVM_C_GRID = (0.1, 1.0, 10.0, 100.0)
 CV_FOLDS = 5
-MIN_TRAIN_PER_CLASS = 2
+MIN_TRAIN_PER_CLASS = 2  # the stratified folds (choice of C, calibration) need two per class
+MIN_TEST_PER_CLASS = 1  # every class must be evaluated on at least one held-out image
+MIN_IMAGES_PER_CLASS = MIN_TRAIN_PER_CLASS + MIN_TEST_PER_CLASS
+# SVC needs no gamma of its own here: the chi-squared width lives in Chi2Kernel, and
+# precomputed or linear kernels ignore it. Passing the default explicitly documents that.
+UNUSED_SVC_GAMMA = "scale"
 # skimage's SIFT crashes on images 5 px wide or less; below 16 px no descriptor window fits anyway
 MIN_SIFT_SIDE = 16
 EXEMPLARS_PER_WORD = 5
@@ -141,7 +146,8 @@ class BowSettings:
 def list_dataset(folder: str | Path) -> dict[str, list[Path]]:
     """Return {class name: image paths} for a folder with one subfolder per class.
 
-    Raises ValueError when there are fewer than two classes or a class has fewer than two images.
+    Raises ValueError when there are fewer than two classes or a class has fewer than
+    MIN_IMAGES_PER_CLASS images.
     """
     root = Path(folder)
     if not root.is_dir():
@@ -158,16 +164,23 @@ def list_dataset(folder: str | Path) -> dict[str, list[Path]]:
             f"'{root.name}' needs at least two class subfolders with images "
             f"(found {len(dataset)}). Choose the folder that contains one folder per class."
         )
-    small = [name for name, paths in dataset.items() if len(paths) < 2]
+    small = [name for name, paths in dataset.items() if len(paths) < MIN_IMAGES_PER_CLASS]
     if small:
-        raise ValueError(f"Each class needs at least two images; too few in: {', '.join(small)}.")
+        raise ValueError(
+            f"Each class needs at least {MIN_IMAGES_PER_CLASS} images ({MIN_TRAIN_PER_CLASS} for training, "
+            f"{MIN_TEST_PER_CLASS} for testing); too few in: {', '.join(small)}."
+        )
     return dataset
 
 
 def split_dataset(
     dataset: dict[str, list[Path]], test_ratio: float, seed: int
 ) -> tuple[list[Path], list[int], list[Path], list[int]]:
-    """Stratified train/test split: every class keeps the same proportion in both parts."""
+    """Stratified train/test split: every class keeps the same proportion in both parts.
+
+    Raises ValueError when the split leaves a class with fewer than two training images
+    or with no test image (its test accuracy would then not measure that class at all).
+    """
     paths = [path for name in dataset for path in dataset[name]]
     labels = [index for index, name in enumerate(dataset) for _ in dataset[name]]
     n_test = max(len(dataset), round(test_ratio * len(paths)))
@@ -178,12 +191,19 @@ def split_dataset(
     )
     # the SVM's C and its probability calibration use stratified folds: every class
     # needs at least two training images or those folds cannot be built
-    per_class = np.bincount(train_y, minlength=len(dataset))
-    short = [name for name, count in zip(dataset, per_class) if count < MIN_TRAIN_PER_CLASS]
+    train_count = np.bincount(train_y, minlength=len(dataset))
+    short = [name for name, count in zip(dataset, train_count) if count < MIN_TRAIN_PER_CLASS]
     if short:
         raise ValueError(
             f"After keeping {test_ratio:.0%} of the images for testing, these classes have fewer than "
             f"{MIN_TRAIN_PER_CLASS} training images: {', '.join(short)}. Add images or lower the test ratio."
+        )
+    test_count = np.bincount(test_y, minlength=len(dataset))
+    untested = [name for name, count in zip(dataset, test_count) if count < MIN_TEST_PER_CLASS]
+    if untested:
+        raise ValueError(
+            f"With {test_ratio:.0%} of the images for testing, no image of these classes is kept for "
+            f"testing: {', '.join(untested)}. Raise the test ratio or add images to those classes."
         )
     return list(train_p), list(train_y), list(test_p), list(test_y)
 
@@ -445,7 +465,7 @@ def cross_validate_svm(
         gamma = chi2_gamma(fit_d)
         val_kernel = np.exp(-gamma * distances[np.ix_(val_idx, fit_idx)])
         for c in c_grid:
-            svc = SVC(kernel="precomputed", C=c, class_weight="balanced")
+            svc = SVC(kernel="precomputed", C=c, gamma=UNUSED_SVC_GAMMA, class_weight="balanced")
             svc.fit(np.exp(-gamma * fit_d), labels[fit_idx])
             scores[c].append(accuracy_score(labels[val_idx], svc.predict(val_kernel)))
     best = max(c_grid, key=lambda c: (np.mean(scores[c]), -c))
@@ -462,7 +482,7 @@ def train_classifier(vectors: np.ndarray, labels: np.ndarray, seed: int = 0, c: 
     if c is None:
         c, cv_accuracy = cross_validate_svm(vectors, labels, seed)
     gamma = chi2_gamma(chi2_distances(vectors, vectors))
-    svc = SVC(kernel=Chi2Kernel(gamma), C=c, class_weight="balanced")
+    svc = SVC(kernel=Chi2Kernel(gamma), C=c, gamma=UNUSED_SVC_GAMMA, class_weight="balanced")
     folds = max(2, min(CV_FOLDS, int(np.bincount(labels).min())))
     # ensemble=False: one SVM fitted on all the training data; the sigmoid that turns
     # its scores into probabilities is fitted on cross-validated scores
@@ -569,10 +589,12 @@ def _extract_all(
     return features, grays
 
 
-def _encode_all(features: list[LocalFeatures], centers: np.ndarray, settings: BowSettings, sigma: float) -> np.ndarray:
-    return np.array(
-        [encode(f, assign_words(f.descriptors, centers, settings.assignment, sigma), settings.pyramid_levels) for f in features]
-    )
+def _encode_all(
+    features: list[LocalFeatures], centers: np.ndarray, settings: BowSettings, sigma: float, assignment: str | None = None
+) -> np.ndarray:
+    """Raw histograms of many images; ``assignment`` overrides the one in ``settings``."""
+    mode = assignment or settings.assignment
+    return np.array([encode(f, assign_words(f.descriptors, centers, mode, sigma), settings.pyramid_levels) for f in features])
 
 
 def _soft_sigma(descriptors: np.ndarray, centers: np.ndarray, settings: BowSettings) -> float:
@@ -596,7 +618,7 @@ def _vectors_for(
         # counting them would make all words present everywhere and the IDF useless.
         presence = counts
         if settings.assignment == "soft":
-            presence = _encode_all(features, centers, replace(settings, assignment="hard"), sigma)
+            presence = _encode_all(features, centers, settings, sigma, assignment="hard")
         idf = idf_weights(presence)
     return sigma, idf, to_vectors(counts, settings, idf)
 

@@ -6,6 +6,7 @@ classes only ask for input, run the work and package the ToolResult.
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog
@@ -37,6 +38,7 @@ from .dialogs import TaskCancelled, run_with_progress
 
 CATEGORY = "Object Recognition (BoW)"
 TOP_WORDS = 5
+DATA_SPLIT = "Data split"
 TRAIN_WARNING = "This image was used to train the model: its result is optimistic. Use a test image."
 SPLIT_TEXT = {
     "train": "TRAIN image (used to fit the model: optimistic result)",
@@ -48,7 +50,7 @@ SPLIT_TEXT = {
 def model_details(model: BowModel, path: Path | None = None) -> dict[str, object]:
     """Results-panel summary of a trained model: data, vocabulary and test performance."""
     metrics = model.metrics
-    counts = {name: 0 for name in model.classes}
+    counts = dict.fromkeys(model.classes, 0)
     for label in model.train_labels:
         counts[model.classes[int(label)]] += 1
     details: dict[str, object] = {
@@ -63,7 +65,7 @@ def model_details(model: BowModel, path: Path | None = None) -> dict[str, object
         details["K by cross-validation"] = "  ".join(f"K={k}: {acc:.1%}" for k, acc in model.k_search)
     details["SVM C (by CV)"] = f"{model.classifier.c:g}"
     details["SVM gamma (1/mean chi2)"] = f"{model.classifier.gamma:.3f}"
-    if metrics["cv_accuracy"] == metrics["cv_accuracy"]:  # not NaN
+    if not math.isnan(metrics["cv_accuracy"]):
         details["Cross-validation accuracy (train)"] = f"{metrics['cv_accuracy']:.1%}"
     details["Test accuracy"] = f"{metrics['accuracy']:.1%}"
     for name, (precision, recall, support) in metrics["per_class"].items():
@@ -81,7 +83,7 @@ def model_details(model: BowModel, path: Path | None = None) -> dict[str, object
 def analysis_details(model: BowModel, analysis: ImageAnalysis, document: ImageDocument) -> dict[str, object]:
     details: dict[str, object] = {
         "Image": document.path.name if document.path is not None else "current image",
-        "Data split": SPLIT_TEXT[analysis.split],
+        DATA_SPLIT: SPLIT_TEXT[analysis.split],
         "Features": len(analysis.features),
         "Vocabulary size K": model.k,
     }
@@ -208,7 +210,7 @@ class BowClassifyTool(ForensicsTool):
         image_details = analysis_details(model, analysis, document)
         details: dict[str, object] = {
             "Operation": "BoW classification",
-            "Data split": image_details.pop("Data split"),
+            DATA_SPLIT: image_details.pop(DATA_SPLIT),
             "Prediction": best,
         }
         details.update({f"p({name})": f"{p:.3f}" for name, p in ranked})
