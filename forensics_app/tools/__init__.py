@@ -27,6 +27,8 @@ from .face_detection import FaceDetectionTool
 from .webcam_capture import WebcamCaptureTool
 from .eigenfaces_builder import EigenfacesBuilderTool
 from .face_recognition import FaceRecognitionTool
+from .bow_tools import BowClassifyTool, BowCodebookTool, BowHistogramTool
+from .cnn_tools import CnnCompareTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -56,6 +58,10 @@ def build_tool_registry() -> ToolRegistry:
             WebcamCaptureTool(),
             EigenfacesBuilderTool(),
             FaceRecognitionTool(),
+            BowCodebookTool(),
+            BowHistogramTool(),
+            BowClassifyTool(),
+            CnnCompareTool(),
         ]
     )
 
@@ -72,4 +78,8 @@ __all__ = [
     "WebcamCaptureTool",
     "EigenfacesBuilderTool",
     "FaceRecognitionTool",
+    "BowCodebookTool",
+    "BowHistogramTool",
+    "BowClassifyTool",
+    "CnnCompareTool",
 ]
