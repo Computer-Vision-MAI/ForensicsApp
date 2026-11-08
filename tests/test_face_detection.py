@@ -1,5 +1,6 @@
 """Unit tests for the FaceDetectionTool and YuNet/Haar face detectors."""
 
+from functools import lru_cache
 from pathlib import Path
 import unittest
 from unittest.mock import MagicMock, patch
@@ -15,16 +16,48 @@ from forensics_app.tools.face_detection import (
     ensure_yunet_model,
 )
 
+from face_fixtures import build_simple_cascade
+
+
+@lru_cache(maxsize=1)
+def _yunet_unavailable_reason() -> str | None:
+    """Fetch the YuNet weights once; return why they are unavailable, if they are.
+
+    ``models/`` is git-ignored, so in CI the weights are downloaded on first use.
+    Tests that need them are skipped (not failed) when there is no network access.
+    """
+    try:
+        ensure_yunet_model()
+    except OSError as exc:  # urllib.error.URLError is a subclass of OSError
+        return f"YuNet weights could not be downloaded: {exc}"
+    return None
+
+
+def requires_yunet(test_func):
+    """Skip the decorated test when the YuNet weights are not available."""
+
+    def wrapper(self, *args, **kwargs):
+        reason = _yunet_unavailable_reason()
+        if reason:
+            self.skipTest(reason)
+        return test_func(self, *args, **kwargs)
+
+    wrapper.__name__ = test_func.__name__
+    wrapper.__doc__ = test_func.__doc__
+    return wrapper
+
 
 class TestFaceDetection(unittest.TestCase):
     """Test suite for face detection algorithms and tool integration."""
 
+    @requires_yunet
     def test_ensure_yunet_model(self) -> None:
         """Verify that the YuNet ONNX weights exist locally."""
         model_path = ensure_yunet_model()
         self.assertTrue(model_path.exists())
         self.assertGreater(model_path.stat().st_size, 100_000)
 
+    @requires_yunet
     def test_detect_faces_yunet_no_faces(self) -> None:
         """Verify that YuNet handles images with no faces gracefully."""
         blank_bgr = np.zeros((100, 100, 3), dtype=np.uint8)
@@ -73,9 +106,14 @@ class TestFaceDetection(unittest.TestCase):
             self.assertIn("Right eye", f0["landmarks"])
             self.assertIn("Nose", f0["landmarks"])
 
+    @requires_yunet
     @patch("forensics_app.tools.face_detection.FaceDetectionDialog")
     def test_face_detection_tool_haar(self, mock_dialog_cls: MagicMock) -> None:
-        """Verify FaceDetectionTool executing with Viola-Jones Haar cascade."""
+        """Verify FaceDetectionTool executing with Viola-Jones Haar cascade.
+
+        The pretrained cascade lives in the git-ignored ``models/`` folder and training
+        it needs ``data/faces_non_faces``, so a small synthetic cascade is used instead.
+        """
         mock_dlg = MagicMock()
         mock_dlg.user_confirmed = True
         mock_dlg.selected_method = "haar"
@@ -91,7 +129,10 @@ class TestFaceDetection(unittest.TestCase):
         doc.current = img.copy()
 
         tool = FaceDetectionTool()
-        with patch("forensics_app.tools.face_detection.messagebox.showinfo"):
+        with patch("forensics_app.tools.face_detection.messagebox.showinfo"), patch(
+            "forensics_app.tools.face_detection.ensure_default_cascade_model",
+            return_value=build_simple_cascade(),
+        ):
             result = tool.run(parent=MagicMock(), document=doc)
 
         self.assertIsNotNone(result)
@@ -101,6 +142,7 @@ class TestFaceDetection(unittest.TestCase):
         self.assertIn("Verdict", result.details)
         self.assertIn("Stages Passed", result.details)
 
+    @requires_yunet
     @patch("forensics_app.tools.face_detection.FaceDetectionDialog")
     def test_face_detection_tool_yunet(self, mock_dialog_cls: MagicMock) -> None:
         """Verify FaceDetectionTool executing with YuNet and custom thresholds."""

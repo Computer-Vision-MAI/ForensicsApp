@@ -1,6 +1,7 @@
 """Unit tests for the Face Recognition tool (Set 6.3)."""
 
 from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 import numpy as np
@@ -12,14 +13,15 @@ from forensics_app.tools.face_recognition import (
     FaceRecognitionTool,
 )
 from forensics_app.tools.face_recognition_core import (
-    DEFAULT_DATA_DIR,
-    DEFAULT_MODEL_DIR,
     classify_face,
     load_face_model,
     make_recognition_gallery,
     prepare_lfw_dataset,
     project_face_image,
+    train_eigenfaces_model,
 )
+
+from face_fixtures import N_COMPONENTS, build_lfw_like_dataset
 
 
 class TestFaceRecognition(unittest.TestCase):
@@ -27,10 +29,34 @@ class TestFaceRecognition(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        """Load dataset and trained model once for the test suite."""
-        cls.meta = prepare_lfw_dataset(DEFAULT_DATA_DIR)
-        cls.model = load_face_model(DEFAULT_MODEL_DIR)
+        """Build a synthetic dataset and train a model once for the test suite.
+
+        ``data/`` and ``models/`` are git-ignored (absent in CI), so everything lives
+        in a temporary directory and the tool's module-level defaults are patched.
+        """
+        cls._tmp = tempfile.TemporaryDirectory()
+        root = Path(cls._tmp.name)
+        cls.data_dir = root / "data" / "lfw_faces"
+        cls.model_dir = root / "models" / "eigenfaces"
+        build_lfw_like_dataset(cls.data_dir)
+        train_eigenfaces_model(n_components=N_COMPONENTS, data_dir=cls.data_dir, model_dir=cls.model_dir)
+
+        cls.meta = prepare_lfw_dataset(cls.data_dir)
+        cls.model = load_face_model(cls.model_dir)
         assert cls.model is not None, "Model should be trained before running tests."
+
+        cls._patches = [
+            patch("forensics_app.tools.face_recognition.DEFAULT_DATA_DIR", cls.data_dir),
+            patch("forensics_app.tools.face_recognition.DEFAULT_MODEL_DIR", cls.model_dir),
+        ]
+        for p in cls._patches:
+            p.start()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        for p in cls._patches:
+            p.stop()
+        cls._tmp.cleanup()
 
     def test_project_face_image(self) -> None:
         """Verify query image projection into k-dimensional subspace."""

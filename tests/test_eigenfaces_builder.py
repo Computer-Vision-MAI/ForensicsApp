@@ -1,6 +1,7 @@
 """Unit tests for the Eigenfaces builder tool (Set 6.2)."""
 
 from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 import numpy as np
@@ -12,8 +13,6 @@ from forensics_app.tools.eigenfaces_builder import (
     EigenfacesDialog,
 )
 from forensics_app.tools.face_recognition_core import (
-    DEFAULT_DATA_DIR,
-    DEFAULT_MODEL_DIR,
     FaceModel,
     load_face_model,
     make_eigenfaces_grid,
@@ -21,13 +20,42 @@ from forensics_app.tools.face_recognition_core import (
     train_eigenfaces_model,
 )
 
+from face_fixtures import N_COMPONENTS, build_lfw_like_dataset
+
 
 class TestEigenfacesBuilder(unittest.TestCase):
-    """Test suite for Eigenface model training, serialization, and grid visualization."""
+    """Test suite for Eigenface model training, serialization, and grid visualization.
+
+    Runs on a synthetic LFW-like dataset in a temporary directory, since ``data/`` and
+    ``models/`` are git-ignored and therefore absent in CI.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._tmp = tempfile.TemporaryDirectory()
+        root = Path(cls._tmp.name)
+        cls.data_dir = root / "data" / "lfw_faces"
+        cls.model_dir = root / "models" / "eigenfaces"
+        build_lfw_like_dataset(cls.data_dir)
+        train_eigenfaces_model(n_components=N_COMPONENTS, data_dir=cls.data_dir, model_dir=cls.model_dir)
+
+        # The builder tool reads the module-level defaults: point them at the fixtures.
+        cls._patches = [
+            patch("forensics_app.tools.eigenfaces_builder.DEFAULT_DATA_DIR", cls.data_dir),
+            patch("forensics_app.tools.eigenfaces_builder.DEFAULT_MODEL_DIR", cls.model_dir),
+        ]
+        for p in cls._patches:
+            p.start()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        for p in cls._patches:
+            p.stop()
+        cls._tmp.cleanup()
 
     def test_prepare_lfw_dataset(self) -> None:
         """Verify that LFW dataset files are extracted and indexed properly."""
-        meta = prepare_lfw_dataset(DEFAULT_DATA_DIR)
+        meta = prepare_lfw_dataset(self.data_dir)
         self.assertIn("train", meta)
         self.assertIn("test", meta)
         self.assertIn("target_names", meta)
@@ -41,10 +69,9 @@ class TestEigenfacesBuilder(unittest.TestCase):
 
     def test_train_eigenfaces_model(self) -> None:
         """Verify PCA model training, mean face saving, and array shapes."""
-        import tempfile
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
-            model = train_eigenfaces_model(n_components=20, data_dir=DEFAULT_DATA_DIR, model_dir=tmp_path)
+            model = train_eigenfaces_model(n_components=20, data_dir=self.data_dir, model_dir=tmp_path)
             self.assertIsInstance(model, FaceModel)
             self.assertEqual(model.eigenfaces.shape[0], 20)
             self.assertEqual(model.X_train_pca.shape[1], 20)
@@ -57,7 +84,7 @@ class TestEigenfacesBuilder(unittest.TestCase):
 
     def test_load_face_model(self) -> None:
         """Verify loading pre-trained FaceModel from disk."""
-        model = load_face_model(DEFAULT_MODEL_DIR)
+        model = load_face_model(self.model_dir)
         self.assertIsNotNone(model)
         self.assertGreaterEqual(len(model.eigenfaces), 20)
         self.assertEqual(model.mean_face.shape, model.img_shape)
