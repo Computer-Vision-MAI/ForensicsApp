@@ -49,6 +49,7 @@ class FaceRecognitionDialog(simpledialog.Dialog):
         test_images: list[dict[str, Any]],
         max_components: int = 100,
     ) -> None:
+        """Show the recognition settings, offering the given test images as sources."""
         self._has_current_image = has_current_image
         self._test_images = test_images
         self._max_components = max_components
@@ -65,6 +66,7 @@ class FaceRecognitionDialog(simpledialog.Dialog):
         super().__init__(parent, "Face Recognition Settings (Set 6.3)")
 
     def body(self, master: tk.Frame) -> tk.Widget:
+        """Build the representation, matching, and test-image source widgets."""
         # 1. Feature Representation Frame
         subspace_frame = ttk.LabelFrame(master, text="Feature Representation", padding=8)
         subspace_frame.grid(row=0, column=0, sticky="ew", pady=(0, 6))
@@ -178,11 +180,13 @@ class FaceRecognitionDialog(simpledialog.Dialog):
         return self._k_entry
 
     def _on_source_changed(self) -> None:
+        """Enable the test-image dropdown only when the test-set source is selected."""
         if hasattr(self, "_test_combo"):
             is_test_set = self._source_var.get() == "test_set"
             self._test_combo.configure(state="readonly" if is_test_set else "disabled")
 
     def validate(self) -> bool:
+        """Check k and m and store the selections; show an error and return False if invalid."""
         try:
             k = int(self._k_var.get().strip())
             m = int(self._m_var.get().strip())
@@ -207,6 +211,7 @@ class FaceRecognitionDialog(simpledialog.Dialog):
             return False
 
     def apply(self) -> None:
+        """Mark the dialog as confirmed."""
         self.user_confirmed = True
 
 
@@ -220,6 +225,7 @@ class FaceRecognitionTool(ForensicsTool):
     requires_image = False
 
     def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult | None:
+        """Project a test face onto the eigenfaces, classify it, and return a match gallery."""
         # 1. Ensure dataset and model exist
         meta = prepare_lfw_dataset(DEFAULT_DATA_DIR)
         model = load_face_model(DEFAULT_MODEL_DIR)

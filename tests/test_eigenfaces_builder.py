@@ -32,6 +32,7 @@ class TestEigenfacesBuilder(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
+        """Build a synthetic dataset, train a model on it, and point the tool at both."""
         cls._tmp = tempfile.TemporaryDirectory()
         root = Path(cls._tmp.name)
         cls.data_dir = root / "data" / "lfw_faces"
@@ -49,6 +50,7 @@ class TestEigenfacesBuilder(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
+        """Undo the patches and delete the temporary dataset and model."""
         for p in cls._patches:
             p.stop()
         cls._tmp.cleanup()

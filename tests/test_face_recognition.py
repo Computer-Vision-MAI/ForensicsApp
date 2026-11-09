@@ -54,6 +54,7 @@ class TestFaceRecognition(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
+        """Undo the patches and delete the temporary dataset and model."""
         for p in cls._patches:
             p.stop()
         cls._tmp.cleanup()
@@ -66,6 +67,57 @@ class TestFaceRecognition(unittest.TestCase):
         w_proj = project_face_image(dummy_img, self.model, k=k)
         self.assertEqual(w_proj.shape, (k,))
         self.assertEqual(w_proj.dtype, np.float64)
+
+    def test_project_face_image_pil_modes_and_sizes(self) -> None:
+        """Any PIL mode and size is converted to the model's grayscale shape."""
+        h, w = self.model.img_shape
+        k = 10
+        base = Image.new("RGB", (w * 2, h * 3), color=(120, 80, 40))
+        for mode in ("RGB", "RGBA", "L", "P", "1"):
+            for size in ((w, h), (w * 2, h * 3)):
+                with self.subTest(mode=mode, size=size):
+                    w_proj = project_face_image(base.resize(size).convert(mode), self.model, k=k)
+                    self.assertEqual(w_proj.shape, (k,))
+                    self.assertEqual(w_proj.dtype, np.float64)
+
+    def test_project_face_image_ndarray_inputs(self) -> None:
+        """2-D, single-channel, BGR and BGRA arrays project like the equivalent gray image."""
+        h, w = self.model.img_shape
+        k = 12
+        gray = np.random.default_rng(0).integers(0, 255, size=(h, w)).astype(np.uint8)
+        expected = project_face_image(gray, self.model, k=k)
+        variants = {
+            "2-D": gray,
+            "H x W x 1": gray[:, :, None],
+            "BGR": np.repeat(gray[:, :, None], 3, axis=2),
+            "BGRA": np.dstack([gray, gray, gray, np.full_like(gray, 255)]),
+            "other size": np.repeat(np.repeat(gray, 2, axis=0), 2, axis=1),
+        }
+        for name, arr in variants.items():
+            with self.subTest(variant=name):
+                w_proj = project_face_image(arr, self.model, k=k)
+                self.assertEqual(w_proj.shape, (k,))
+                if name != "other size":
+                    np.testing.assert_allclose(w_proj, expected)
+
+    def test_metadata_paths_are_relocated_to_the_data_dir(self) -> None:
+        """Stale relative paths in metadata.json are re-pointed at the dataset folder."""
+        import json
+        import shutil
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            moved = Path(tmp_dir) / "lfw_faces"
+            shutil.copytree(self.data_dir, moved)
+            meta_path = moved / "metadata.json"
+            meta = json.loads(meta_path.read_text())
+            for split in ("train", "test"):
+                for item in meta[split]:
+                    item["path"] = f"no/such/dir/{item['filename']}"
+            meta_path.write_text(json.dumps(meta))
+
+            relocated = prepare_lfw_dataset(moved)
+            self.assertTrue(all(Path(i["path"]).exists() for i in relocated["train"] + relocated["test"]))
+            self.assertTrue(relocated["train"][0]["path"].startswith(str(moved)))
 
     def test_classify_face_majority_voting(self) -> None:
         """Verify m-NN majority voting strategy."""

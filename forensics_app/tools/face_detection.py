@@ -11,7 +11,10 @@ Includes:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import shutil
+import tempfile
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 from typing import Any
@@ -29,17 +32,19 @@ except Exception:
     pass
 
 from forensics_app.core import ImageDocument
+from forensics_app.paths import MODELS_DIR
 from .base import ForensicsTool, ToolResult
-from .dialogs import load_image_file
+from .dialogs import TaskCancelled, load_image_file, run_with_progress
 from .haar_adaboost import (
     CANONICAL_PATCH_SIZE,
     DEFAULT_CASCADE_PATH,
     DEFAULT_TRAIN_NEG,
     DEFAULT_TRAIN_POS,
     ViolaJonesCascade,
-    compute_integral_image,
     draw_haar_overlay,
     ensure_default_cascade_model,
+    load_cascade_model,
+    patch_to_normalized_integral,
     train_viola_jones_cascade,
 )
 
@@ -47,14 +52,32 @@ YUNET_MODEL_URL = (
     "https://huggingface.co/opencv/opencv_zoo/resolve/main/"
     "models/face_detection_yunet/face_detection_yunet_2023mar.onnx"
 )
-YUNET_MODEL_PATH = Path("models/face_detection_yunet_2023mar.onnx")
+YUNET_MODEL_PATH = MODELS_DIR / "face_detection_yunet_2023mar.onnx"
+YUNET_MIN_SIZE_BYTES = 100_000
+YUNET_DOWNLOAD_TIMEOUT_S = 30.0
 
 
-def ensure_yunet_model(path: Path = YUNET_MODEL_PATH) -> Path:
-    """Ensure the YuNet ONNX weights exist locally; download if needed."""
-    if not path.exists() or path.stat().st_size < 100_000:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        urllib.request.urlretrieve(YUNET_MODEL_URL, str(path))
+def ensure_yunet_model(
+    path: Path = YUNET_MODEL_PATH, timeout: float = YUNET_DOWNLOAD_TIMEOUT_S
+) -> Path:
+    """Ensure the YuNet ONNX weights exist locally; download if needed.
+
+    The download goes to a temporary file next to ``path`` and only replaces it once
+    complete, so an interrupted download never leaves a truncated model behind.
+    """
+    path = Path(path)
+    if path.exists() and path.stat().st_size >= YUNET_MIN_SIZE_BYTES:
+        return path
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".part")
+    try:
+        with os.fdopen(fd, "wb") as out, urllib.request.urlopen(YUNET_MODEL_URL, timeout=timeout) as response:
+            shutil.copyfileobj(response, out)
+        os.replace(tmp_name, path)
+    finally:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
     return path
 
 
@@ -77,6 +100,28 @@ def compute_face_drawing_params(box_w: int, box_h: int) -> dict[str, Any]:
     }
 
 
+def create_yunet_detector(
+    input_size: tuple[int, int],
+    model_path: Path = YUNET_MODEL_PATH,
+    score_threshold: float = 0.6,
+    nms_threshold: float = 0.3,
+    top_k: int = 5000,
+) -> Any:
+    """Load the YuNet model once and return a reusable ``cv2.FaceDetectorYN``.
+
+    ``input_size`` is (width, height); ``detect_faces_with_detector`` updates it per frame.
+    """
+    ensure_yunet_model(model_path)
+    return cv2.FaceDetectorYN.create(
+        str(model_path),
+        "",
+        tuple(int(v) for v in input_size),
+        float(score_threshold),
+        float(nms_threshold),
+        int(top_k),
+    )
+
+
 def detect_faces_yunet(
     image_bgr: np.ndarray,
     model_path: Path = YUNET_MODEL_PATH,
@@ -84,19 +129,20 @@ def detect_faces_yunet(
     nms_threshold: float = 0.3,
     top_k: int = 5000,
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
-    """Run OpenCV YuNet face detector with dynamically scaled annotations."""
-    ensure_yunet_model(model_path)
+    """Run OpenCV YuNet face detector on a single image with dynamically scaled annotations."""
+    h, w = image_bgr.shape[:2]
+    detector = create_yunet_detector((w, h), model_path, score_threshold, nms_threshold, top_k)
+    return detect_faces_with_detector(detector, image_bgr)
+
+
+def detect_faces_with_detector(
+    detector: Any, image_bgr: np.ndarray
+) -> tuple[np.ndarray, list[dict[str, Any]]]:
+    """Detect and annotate faces with an existing YuNet detector (e.g. one per webcam session)."""
     h, w = image_bgr.shape[:2]
     annotated = image_bgr.copy()
 
-    detector = cv2.FaceDetectorYN.create(
-        str(model_path),
-        "",
-        (w, h),
-        float(score_threshold),
-        float(nms_threshold),
-        int(top_k),
-    )
+    detector.setInputSize((w, h))
     _, faces = detector.detect(image_bgr)
     results: list[dict[str, Any]] = []
 
@@ -166,6 +212,28 @@ def detect_faces_yunet(
     return annotated, results
 
 
+def scale_face_results(faces: list[dict[str, Any]], scale: float) -> list[dict[str, Any]]:
+    """Return detections with boxes and landmarks scaled by ``scale`` (e.g. to a resized preview)."""
+    if scale == 1.0:
+        return faces
+
+    def _s(value: int) -> int:
+        """Scale one coordinate and round it to whole pixels."""
+        return int(round(value * scale))
+
+    scaled: list[dict[str, Any]] = []
+    for face in faces:
+        x, y, bw, bh = face["box"]
+        scaled.append(
+            {
+                **face,
+                "box": (_s(x), _s(y), max(1, _s(bw)), max(1, _s(bh))),
+                "landmarks": {name: (_s(px), _s(py)) for name, (px, py) in face["landmarks"].items()},
+            }
+        )
+    return scaled
+
+
 class WebcamCaptureDialog(tk.Toplevel):
     """Real-time webcam preview dialog running YuNet face detection."""
 
@@ -177,6 +245,7 @@ class WebcamCaptureDialog(tk.Toplevel):
         nms_threshold: float = 0.3,
         top_k: int = 5000,
     ) -> None:
+        """Open the webcam and run live YuNet detection until a frame is captured or the dialog closes."""
         super().__init__(parent)
         self.title("Real-Time Webcam Face Detection (YuNet)")
         self.transient(parent.winfo_toplevel())
@@ -188,6 +257,7 @@ class WebcamCaptureDialog(tk.Toplevel):
         self._top_k = top_k
 
         self._cap: cv2.VideoCapture | None = None
+        self._detector: Any = None  # created on the first frame, then reused
         self.captured_image: Image.Image | None = None
         self.faces_detected: int = 0
         self.detected_face_list: list[dict[str, Any]] = []
@@ -224,6 +294,7 @@ class WebcamCaptureDialog(tk.Toplevel):
         self.wait_window(self)
 
     def _update_loop(self) -> None:
+        """Grab a frame, detect faces with the reused detector, and refresh the preview."""
         if not self._running or self._cap is None or not self._cap.isOpened():
             return
 
@@ -231,15 +302,17 @@ class WebcamCaptureDialog(tk.Toplevel):
         if ret:
             frame_bgr = cv2.flip(frame_bgr, 1)
 
-            annotated_bgr, faces = detect_faces_yunet(
-                frame_bgr,
-                self._model_path,
-                self._score_threshold,
-                self._nms_threshold,
-                self._top_k,
-            )
+            if self._detector is None:
+                h, w = frame_bgr.shape[:2]
+                self._detector = create_yunet_detector(
+                    (w, h),
+                    self._model_path,
+                    self._score_threshold,
+                    self._nms_threshold,
+                    self._top_k,
+                )
+            annotated_bgr, faces = detect_faces_with_detector(self._detector, frame_bgr)
             self.faces_detected = len(faces)
-            self.detected_face_list = faces
 
             self._status_var.set(
                 f"Webcam Active — Detected faces: {len(faces)}. Click 'Capture Frame' to import preview."
@@ -247,11 +320,15 @@ class WebcamCaptureDialog(tk.Toplevel):
 
             frame_rgb = cv2.cvtColor(annotated_bgr, cv2.COLOR_BGR2RGB)
             pil_img = Image.fromarray(frame_rgb)
+            scale = 1.0
             if pil_img.width > 640:
                 scale = 640 / pil_img.width
                 pil_img = pil_img.resize(
                     (640, int(pil_img.height * scale)), Image.Resampling.BILINEAR
                 )
+            # The captured image is the (possibly downscaled) preview, so report the
+            # face coordinates in that same scale.
+            self.detected_face_list = scale_face_results(faces, scale)
 
             self._photo_ref = ImageTk.PhotoImage(pil_img, master=self)
             self._video_label.configure(image=self._photo_ref)
@@ -260,11 +337,13 @@ class WebcamCaptureDialog(tk.Toplevel):
         self.after(30, self._update_loop)
 
     def _on_capture(self) -> None:
+        """Keep the current annotated frame and close the dialog."""
         if hasattr(self, "_current_frame"):
             self.captured_image = self._current_frame
         self._on_close()
 
     def _on_close(self) -> None:
+        """Stop the preview loop, release the camera, and close the dialog."""
         self._running = False
         if self._cap is not None and self._cap.isOpened():
             self._cap.release()
@@ -276,6 +355,7 @@ class FaceDetectionDialog(simpledialog.Dialog):
     """Dialog allowing user to choose method, customize YuNet/Viola-Jones params, and select input source."""
 
     def __init__(self, parent: tk.Misc, has_current_image: bool) -> None:
+        """Show the face detection options for a document with or without an open image."""
         self._has_current_image = has_current_image
         self.selected_method: str = "yunet"
         self.selected_source: str = "current" if has_current_image else "file"
@@ -296,6 +376,7 @@ class FaceDetectionDialog(simpledialog.Dialog):
         super().__init__(parent, "Face Detection Options")
 
     def body(self, master: tk.Frame) -> tk.Widget:
+        """Build the method, parameter, and input-source widgets."""
         # 1. Method Frame
         method_frame = ttk.LabelFrame(master, text="Detection Method", padding=8)
         method_frame.pack(fill="x", padx=6, pady=4)
@@ -436,6 +517,7 @@ class FaceDetectionDialog(simpledialog.Dialog):
         return method_frame
 
     def _on_method_changed(self) -> None:
+        """Enable the widgets of the selected method and disable the others."""
         is_haar = self._method_var.get() == "haar"
         if is_haar:
             self._rb_webcam.configure(state="disabled")
@@ -471,12 +553,14 @@ class FaceDetectionDialog(simpledialog.Dialog):
                     pass
 
     def _on_cascade_mode_changed(self) -> None:
+        """Enable the training fields only when training a custom cascade."""
         if self._method_var.get() == "haar":
             is_new = self._cascade_mode_var.get() == "train_new"
             self._stages_entry.configure(state="normal" if is_new else "disabled")
             self._samples_entry.configure(state="normal" if is_new else "disabled")
 
     def validate(self) -> bool:
+        """Check the entered parameters; show an error and return False if any is invalid."""
         try:
             st = float(self._score_var.get().strip())
             nms = float(self._nms_var.get().strip())
@@ -503,6 +587,8 @@ class FaceDetectionDialog(simpledialog.Dialog):
                     stages = [int(s.strip()) for s in stages_text.split(",") if s.strip()]
                     if not stages:
                         raise ValueError("Specify at least one stage (e.g. 2, 5, 10).")
+                    if any(count < 1 for count in stages):
+                        raise ValueError("Each stage needs at least one classifier (e.g. 2, 5, 10).")
                     self.cascade_stages_str = stages_text
                     self.train_samples = max(20, int(self._samples_var.get().strip()))
 
@@ -512,6 +598,7 @@ class FaceDetectionDialog(simpledialog.Dialog):
             return False
 
     def apply(self) -> None:
+        """Store the confirmed choices on the dialog."""
         self.selected_method = self._method_var.get()
         self.selected_source = self._source_var.get()
         self.cascade_mode = self._cascade_mode_var.get()
@@ -534,6 +621,7 @@ class FaceDetectionTool(ForensicsTool):
     requires_image = False
 
     def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult | None:
+        """Ask for options, run the chosen detector, and return the annotated result."""
         dialog = FaceDetectionDialog(parent, has_current_image=document.is_loaded)
         if not dialog.user_confirmed:
             return None
@@ -658,15 +746,33 @@ class FaceDetectionTool(ForensicsTool):
         # ---------------------------------------------------------
         # Method 2: Viola-Jones Attentional Cascade
         # ---------------------------------------------------------
-        if dialog.cascade_mode == "train_new":
-            stage_list = [int(s.strip()) for s in dialog.cascade_stages_str.split(",") if s.strip()]
-            cascade = train_viola_jones_cascade(
-                stage_configs=stage_list,
-                max_pos=dialog.train_samples,
-                max_neg=dialog.train_samples * 2,
-            )
-        else:
-            cascade = ensure_default_cascade_model(DEFAULT_CASCADE_PATH)
+        # Training is slow, so it runs on a worker thread behind a progress window.
+        try:
+            if dialog.cascade_mode == "train_new":
+                stage_list = [int(s.strip()) for s in dialog.cascade_stages_str.split(",") if s.strip()]
+                cascade = run_with_progress(
+                    parent,
+                    "Training Viola-Jones cascade",
+                    lambda report, cancelled: train_viola_jones_cascade(
+                        stage_configs=stage_list,
+                        max_pos=dialog.train_samples,
+                        max_neg=dialog.train_samples * 2,
+                        progress=report,
+                        should_cancel=cancelled,
+                    ),
+                )
+            else:
+                cascade = load_cascade_model(DEFAULT_CASCADE_PATH)
+                if cascade is None or not cascade.stages:
+                    cascade = run_with_progress(
+                        parent,
+                        "Training default Viola-Jones cascade",
+                        lambda report, cancelled: ensure_default_cascade_model(
+                            DEFAULT_CASCADE_PATH, progress=report, should_cancel=cancelled
+                        ),
+                    )
+        except TaskCancelled:
+            return None
 
         all_classifiers = cascade.get_all_classifiers()
         total_stages = len(cascade.stages)
@@ -694,11 +800,7 @@ class FaceDetectionTool(ForensicsTool):
                 face_crop = input_image.crop((fx, fy, fx + fw, fy + fh))
 
                 # Canonical 19x19 evaluation
-                patch_19 = face_crop.convert("L").resize(CANONICAL_PATCH_SIZE, Image.Resampling.BILINEAR)
-                arr_19 = np.array(patch_19, dtype=np.float64)
-                arr_norm = arr_19 / (arr_19.max() + 1e-6)
-                int_img = compute_integral_image(arr_norm)
-                int_norm = int_img / (int_img.max() + 1e-6)
+                int_norm = patch_to_normalized_integral(face_crop)
 
                 is_face, stages_passed, stage_scores = cascade.predict(int_norm)
                 scores_str = ", ".join([f"S{s+1}: {sc:+.2f}" for s, sc in enumerate(stage_scores)])
@@ -743,11 +845,7 @@ class FaceDetectionTool(ForensicsTool):
 
         else:
             # Standalone image (e.g. 19x19 crop from data/faces_non_faces or user image without detected bbox)
-            patch_19 = input_image.convert("L").resize(CANONICAL_PATCH_SIZE, Image.Resampling.BILINEAR)
-            arr_19 = np.array(patch_19, dtype=np.float64)
-            arr_norm = arr_19 / (arr_19.max() + 1e-6)
-            int_img = compute_integral_image(arr_norm)
-            int_norm = int_img / (int_img.max() + 1e-6)
+            int_norm = patch_to_normalized_integral(input_image)
 
             is_face, stages_passed, stage_scores = cascade.predict(int_norm)
             scores_str = ", ".join([f"S{s+1}: {sc:+.2f}" for s, sc in enumerate(stage_scores)])

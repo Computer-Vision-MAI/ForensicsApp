@@ -54,7 +54,7 @@ def build_lfw_like_dataset(data_dir: Path, seed: int = 0) -> None:
             for _ in range(count):
                 sample = np.clip(prototype + rng.normal(0.0, 12.0, size=FACE_SHAPE), 0, 255)
                 filename = f"{split}_{counters[split]:04d}_{safe_name}.png"
-                Image.fromarray(sample.astype(np.uint8), mode="L").save(folder / filename)
+                Image.fromarray(sample.astype(np.uint8)).save(folder / filename)
                 counters[split] += 1
 
 

@@ -13,6 +13,7 @@ from tkinter import messagebox, simpledialog, ttk
 import numpy as np
 
 from forensics_app.core import ImageDocument
+from forensics_app.paths import display_path
 from .base import ForensicsTool, ToolResult
 from .face_recognition_core import (
     DEFAULT_DATA_DIR,
@@ -35,6 +36,7 @@ class EigenfacesDialog(simpledialog.Dialog):
         existing_components: int | None = None,
         existing_variance: float | None = None,
     ) -> None:
+        """Show the builder options, pre-filled from the model on disk if there is one."""
         self._model_exists = model_exists
         self._existing_components = existing_components
         self._existing_variance = existing_variance
@@ -46,6 +48,7 @@ class EigenfacesDialog(simpledialog.Dialog):
         super().__init__(parent, "Eigenface Builder (Set 6.2)")
 
     def body(self, master: tk.Frame) -> tk.Widget:
+        """Build the model-status banner and the parameter fields."""
         # Information banner
         if self._existing_components is not None:
             status_text = (
@@ -62,7 +65,7 @@ class EigenfacesDialog(simpledialog.Dialog):
         ttk.Label(info_frame, text=status_text, foreground="#2b5797").pack(anchor="w")
         ttk.Label(
             info_frame,
-            text=f"Mean faces will be saved to: {DEFAULT_MODEL_DIR / 'mean_faces'}",
+            text=f"Mean faces will be saved to: {display_path(DEFAULT_MODEL_DIR / 'mean_faces')}",
             font="TkSmallCaptionFont",
             foreground="#555555",
         ).pack(anchor="w", pady=(4, 0))
@@ -102,6 +105,7 @@ class EigenfacesDialog(simpledialog.Dialog):
         return self._k_entry
 
     def validate(self) -> bool:
+        """Check K and the component count; show an error and return False if invalid."""
         try:
             k = int(self._k_var.get().strip())
             comp = int(self._comp_var.get().strip())
@@ -124,6 +128,7 @@ class EigenfacesDialog(simpledialog.Dialog):
             return False
 
     def apply(self) -> None:
+        """Mark the dialog as confirmed."""
         self.user_confirmed = True
 
 
@@ -137,6 +142,7 @@ class EigenfacesBuilderTool(ForensicsTool):
     requires_image = False
 
     def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult | None:
+        """Load or train the Eigenfaces model and return a grid of the top K eigenfaces."""
         # Check whether a trained model currently exists
         existing_model = load_face_model(DEFAULT_MODEL_DIR)
         existing_comps = len(existing_model.eigenfaces) if existing_model else None
@@ -194,7 +200,7 @@ class EigenfacesBuilderTool(ForensicsTool):
             "Total Components Stored": f"{total_stored_n}  ({total_stored_var:.2f}% variance)",
             "Training Faces": len(model.X_train_pca),
             "Classes": len(model.target_names),
-            "Mean Faces Directory": str(mean_faces_path),
+            "Mean Faces Directory": display_path(mean_faces_path),
             "Image Dimensions": f"{model.img_shape[1]} × {model.img_shape[0]} px",
         }
 

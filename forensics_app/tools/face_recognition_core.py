@@ -23,8 +23,10 @@ from sklearn.decomposition import PCA
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.model_selection import train_test_split
 
-DEFAULT_DATA_DIR = Path("data/lfw_faces")
-DEFAULT_MODEL_DIR = Path("models/eigenfaces")
+from forensics_app.paths import DATA_DIR, MODELS_DIR
+
+DEFAULT_DATA_DIR = DATA_DIR / "lfw_faces"
+DEFAULT_MODEL_DIR = MODELS_DIR / "eigenfaces"
 
 
 @dataclass
@@ -66,11 +68,12 @@ def prepare_lfw_dataset(
     dict[str, Any]
         Metadata dictionary with train/test file info and class names.
     """
+    data_dir = Path(data_dir)
     metadata_path = data_dir / "metadata.json"
     if metadata_path.exists():
         try:
             with open(metadata_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                return _relocate_metadata_paths(json.load(f), data_dir)
         except Exception:
             pass
 
@@ -95,6 +98,7 @@ def prepare_lfw_dataset(
             h, w = sample_img.height, sample_img.width
 
         def _index_files(files: list[Path]) -> list[dict[str, Any]]:
+            """Build metadata entries (path, label, name) from exported image filenames."""
             items: list[dict[str, Any]] = []
             for f in files:
                 parts = f.stem.split("_", 2)
@@ -143,6 +147,7 @@ def prepare_lfw_dataset(
     def _save_set(
         x_data: np.ndarray, y_data: np.ndarray, folder: Path, prefix: str
     ) -> list[dict[str, Any]]:
+        """Save one split as normalized 8-bit PNGs and return its metadata entries."""
         file_list: list[dict[str, Any]] = []
         for i in range(len(x_data)):
             label = int(y_data[i])
@@ -155,7 +160,7 @@ def prepare_lfw_dataset(
             img_arr = x_data[i].reshape((h, w))
             img_norm = (img_arr - img_arr.min()) / (img_arr.max() - img_arr.min() + 1e-8)
             img_uint8 = (img_norm * 255.0).astype(np.uint8)
-            Image.fromarray(img_uint8, mode="L").save(file_path)
+            Image.fromarray(img_uint8).save(file_path)
 
             file_list.append(
                 {
@@ -180,6 +185,21 @@ def prepare_lfw_dataset(
     with open(metadata_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
 
+    return meta
+
+
+def _relocate_metadata_paths(meta: dict[str, Any], data_dir: Path) -> dict[str, Any]:
+    """Point stored image paths at ``data_dir`` when they do not exist as written.
+
+    Older metadata files store paths relative to the directory the app was started
+    from; this keeps them usable when it is started from somewhere else.
+    """
+    for split in ("train", "test"):
+        for item in meta.get(split, []):
+            if not Path(item["path"]).exists():
+                candidate = data_dir / split / item["filename"]
+                if candidate.exists():
+                    item["path"] = str(candidate)
     return meta
 
 
@@ -239,7 +259,7 @@ def train_eigenfaces_model(
 
     # Global mean face
     global_mean_uint8 = np.clip(mean_face, 0, 255).astype(np.uint8)
-    Image.fromarray(global_mean_uint8, mode="L").save(mean_faces_dir / "mean_face_global.png")
+    Image.fromarray(global_mean_uint8).save(mean_faces_dir / "mean_face_global.png")
 
     # Per-class mean faces
     for class_idx, name in enumerate(target_names):
@@ -248,7 +268,7 @@ def train_eigenfaces_model(
             class_mean = np.mean(x_train[class_mask], axis=0).reshape((h, w))
             class_mean_uint8 = np.clip(class_mean, 0, 255).astype(np.uint8)
             safe_name = name.replace(" ", "_")
-            Image.fromarray(class_mean_uint8, mode="L").save(
+            Image.fromarray(class_mean_uint8).save(
                 mean_faces_dir / f"mean_face_{safe_name}.png"
             )
 
@@ -369,7 +389,7 @@ def make_eigenfaces_grid(
         ef_norm = (ef - ef.min()) / (ef.max() - ef.min() + 1e-8)
         ef_uint8 = (ef_norm * 255.0).astype(np.uint8)
 
-        ef_pil = Image.fromarray(ef_uint8, mode="L").convert("RGB")
+        ef_pil = Image.fromarray(ef_uint8).convert("RGB")
         ef_pil = ef_pil.resize((thumb_w, thumb_h), Image.Resampling.NEAREST)
 
         grid_img.paste(ef_pil, (x, y + header_h))
@@ -410,13 +430,15 @@ def project_face_image(
         gray = image.convert("L").resize((w, h), Image.Resampling.BILINEAR)
         arr = np.array(gray, dtype=np.float64).flatten()
     else:
-        if image.ndim == 3:
-            import cv2
+        import cv2
 
+        if image.ndim == 3 and image.shape[2] == 1:
+            image = image[:, :, 0]
+        elif image.ndim == 3 and image.shape[2] == 4:
+            image = cv2.cvtColor(image, cv2.COLOR_BGRA2GRAY)
+        elif image.ndim == 3:
             image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         if image.shape != (h, w):
-            import cv2
-
             image = cv2.resize(image, (w, h))
         arr = image.astype(np.float64).flatten()
 
@@ -613,6 +635,7 @@ def make_recognition_gallery(
 
     # Helper to paste thumbnail with label
     def _paste_face(img: Image.Image, x_pos: int, title: str, subtitle: str, border_color: tuple[int, int, int]) -> None:
+        """Paste one resized face thumbnail with its border and two caption lines."""
         resized = img.convert("RGB").resize((thumb_w, thumb_h), Image.Resampling.BILINEAR)
         y_pos = banner_h + pad
         gallery.paste(resized, (x_pos, y_pos))

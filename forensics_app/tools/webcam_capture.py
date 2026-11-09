@@ -18,13 +18,49 @@ from PIL import Image, ImageTk
 
 from forensics_app.core import ImageDocument
 from .base import ForensicsTool, ToolResult
-from .face_detection import YUNET_MODEL_PATH, detect_faces_yunet, ensure_yunet_model
+from .face_detection import detect_faces_yunet
+
+# LFW face crops are 50 px high by 37 px wide; the crop is 1.35x the detected face height.
+LFW_ASPECT_W_OVER_H = 37.0 / 50.0
+LFW_CROP_HEIGHT_FACTOR = 1.35
+
+
+def compute_lfw_crop_box(
+    face_box: tuple[int, int, int, int], image_size: tuple[int, int]
+) -> tuple[int, int, int, int]:
+    """Return an LFW-shaped (50:37) crop box ``(x1, y1, x2, y2)`` around a detected face.
+
+    The crop is centred on the face. Near the image borders it is shifted inside the
+    frame instead of being cut off, so it keeps the LFW aspect ratio; it is shrunk
+    only when it is larger than the frame itself.
+    """
+    bx, by, bw, bh = face_box
+    img_w, img_h = image_size
+    cx = bx + bw / 2.0
+    cy = by + bh / 2.0
+
+    crop_h = bh * LFW_CROP_HEIGHT_FACTOR
+    crop_w = crop_h * LFW_ASPECT_W_OVER_H
+    if crop_w > img_w or crop_h > img_h:
+        shrink = min(img_w / crop_w, img_h / crop_h)
+        crop_w *= shrink
+        crop_h *= shrink
+
+    left = min(max(cx - crop_w / 2.0, 0.0), img_w - crop_w)
+    top = min(max(cy - crop_h / 2.0, 0.0), img_h - crop_h)
+
+    x1 = min(int(round(left)), img_w - 1)
+    y1 = min(int(round(top)), img_h - 1)
+    x2 = min(img_w, max(x1 + 1, int(round(left + crop_w))))
+    y2 = min(img_h, max(y1 + 1, int(round(top + crop_h))))
+    return x1, y1, x2, y2
 
 
 class WebcamPhotoDialog(tk.Toplevel):
     """Clean live webcam window without overlays, offering capture and save options."""
 
     def __init__(self, parent: tk.Misc) -> None:
+        """Open the webcam and show a clean live preview until the user captures or closes."""
         super().__init__(parent)
         self.title("Webcam Photo Capture")
         self.transient(parent.winfo_toplevel())
@@ -38,12 +74,6 @@ class WebcamPhotoDialog(tk.Toplevel):
         self._current_frame_bgr: np.ndarray | None = None
         self._photo_ref: ImageTk.PhotoImage | None = None
         self._running = True
-
-        # Ensure YuNet model exists in case user selects face auto-crop
-        try:
-            ensure_yunet_model(YUNET_MODEL_PATH)
-        except Exception:
-            pass
 
         # 1. Video Display
         self._video_label = ttk.Label(self)
@@ -101,9 +131,14 @@ class WebcamPhotoDialog(tk.Toplevel):
             return
 
         self._update_loop()
+        try:
+            self.grab_set()  # modal: the main window waits until the capture is done
+        except tk.TclError:
+            pass  # window not viewable yet on some platforms; still usable, just not modal
         self.wait_window(self)
 
     def _update_loop(self) -> None:
+        """Grab a frame and refresh the clean (overlay-free) preview."""
         if not self._running or self._cap is None or not self._cap.isOpened():
             return
 
@@ -144,32 +179,24 @@ class WebcamPhotoDialog(tk.Toplevel):
             self._on_close()
             return
 
-        # Run face detection in the background to find coordinates
+        # Find the face coordinates with YuNet
         try:
             _, faces = detect_faces_yunet(self._current_frame_bgr, score_threshold=0.5)
-        except Exception:
-            faces = []
+        except Exception as error:  # e.g. model download failed: report it, keep the full frame
+            self.captured_image = self._current_frame_pil.copy()
+            self.capture_mode = (
+                f"Full Frame (face detection failed: {error}. "
+                "Check the YuNet model / network connection and try again)"
+            )
+            self._status_var.set(self.capture_mode)
+            self._on_close()
+            return
 
         if faces:
             # Pick largest detected face
             best_face = max(faces, key=lambda f: f["box"][2] * f["box"][3])
-            bx, by, bw, bh = best_face["box"]
-
-            img_w, img_h = self._current_frame_pil.size
-            cx = bx + bw / 2.0
-            cy = by + bh / 2.0
-
-            # LFW canonical aspect ratio is 50 height to 37 width (1.35)
-            crop_h = bh * 1.35
-            crop_w = crop_h * (37.0 / 50.0)
-
-            x1 = max(0, int(round(cx - crop_w / 2.0)))
-            y1 = max(0, int(round(cy - crop_h / 2.0)))
-            x2 = min(img_w, int(round(cx + crop_w / 2.0)))
-            y2 = min(img_h, int(round(cy + crop_h / 2.0)))
-
-            cropped = self._current_frame_pil.crop((x1, y1, x2, y2))
-            self.captured_image = cropped
+            crop_box = compute_lfw_crop_box(best_face["box"], self._current_frame_pil.size)
+            self.captured_image = self._current_frame_pil.crop(crop_box)
             self.capture_mode = "Cropped Face (LFW 50:37 Format)"
         else:
             # Fallback to full frame if no face was found
@@ -191,11 +218,16 @@ class WebcamPhotoDialog(tk.Toplevel):
         )
         if save_path:
             out_path = Path(save_path)
-            self._current_frame_pil.save(out_path)
+            try:
+                self._current_frame_pil.save(out_path)
+            except (OSError, ValueError) as error:
+                messagebox.showerror("Could not save photo", str(error), parent=self)
+                return
             self.saved_path = out_path
             self._status_var.set(f"Saved photo to: {out_path.name}")
 
     def _on_close(self) -> None:
+        """Stop the preview loop, release the camera, and close the dialog."""
         self._running = False
         if self._cap is not None and self._cap.isOpened():
             self._cap.release()
@@ -213,6 +245,7 @@ class WebcamCaptureTool(ForensicsTool):
     requires_image = False
 
     def run(self, parent: tk.Misc, document: ImageDocument) -> ToolResult | None:
+        """Open the webcam dialog and return the captured photo, if any."""
         dialog = WebcamPhotoDialog(parent)
         captured = dialog.captured_image
         if captured is None:
