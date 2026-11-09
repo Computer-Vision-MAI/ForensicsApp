@@ -24,6 +24,13 @@ from forensics_app.tools.face_detection import (
     scale_face_results,
 )
 
+from forensics_app.tools.haar_adaboost import (
+    CascadeStage,
+    FeatureType,
+    HaarLikeFeature,
+    ViolaJonesCascade,
+)
+
 from face_fixtures import build_simple_cascade
 
 FD = "forensics_app.tools.face_detection"
@@ -230,6 +237,29 @@ class TestViolaJonesTool(unittest.TestCase):
         self.assertIn("Viola-Jones Confirmed", result.details)
         self.assertNotIn("Verdict", result.details)
         self.assertEqual(result.image.size, (120, 120))
+
+    def test_overlay_shows_only_features_active_on_the_face(
+        self, mock_dialog_cls: MagicMock, _info: MagicMock
+    ) -> None:
+        """A confirmed face is drawn with the stumps that voted 'face' on it, not all of them."""
+        mock_dialog_cls.return_value = _haar_dialog()
+        doc = _document((40, 40), (0, 0, 0))
+        left_bright = Image.new("RGB", (40, 40), (0, 0, 0))
+        left_bright.paste((255, 255, 255), (0, 0, 20, 40))
+        doc.original = left_bright.copy()
+        doc.current = left_bright.copy()
+
+        fires = HaarLikeFeature(FeatureType.TWO_VERTICAL, (0, 0), 18, 18, threshold=0.0, polarity=-1, weight=1.0)
+        silent = HaarLikeFeature(FeatureType.TWO_VERTICAL, (0, 0), 18, 18, threshold=0.0, polarity=1, weight=0.5)
+        cascade = ViolaJonesCascade([CascadeStage([fires, silent], threshold=-10.0)])
+
+        with patch(f"{FD}.load_cascade_model", return_value=cascade), patch(
+            f"{FD}.detect_faces_yunet", return_value=(np.zeros((40, 40, 3), np.uint8), [])
+        ), patch(f"{FD}.draw_haar_overlay", side_effect=lambda image, **_: image) as overlay:
+            result = FaceDetectionTool().run(parent=MagicMock(), document=doc)
+
+        self.assertEqual(overlay.call_args.kwargs["classifiers"], [fires])
+        self.assertEqual(result.details["Active Features"], "1 / 2")
 
     def test_missing_cascade_is_trained_behind_a_progress_window(
         self, mock_dialog_cls: MagicMock, _info: MagicMock
