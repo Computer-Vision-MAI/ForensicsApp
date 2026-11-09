@@ -9,7 +9,9 @@ build/
 dist/
 *.egg-info/
 outputs/
-models/
+# Trained models (incl. models/eigenfaces) and datasets live only at the repo root
+/models/
 datasets/
 .coverage
 coverage.xml
+/data/

@@ -23,6 +23,10 @@ from .corner_detection import CornerDetectionTool
 from .keypoint_detection import KeypointDetectionTool
 from .feature_matching import FeatureMatchingTool
 from .image_lookup import ImageLookupTool
+from .face_detection import FaceDetectionTool
+from .webcam_capture import WebcamCaptureTool
+from .eigenfaces_builder import EigenfacesBuilderTool
+from .face_recognition import FaceRecognitionTool
 from .bow_tools import BowClassifyTool, BowCodebookTool, BowHistogramTool
 from .cnn_tools import CnnCompareTool
 
@@ -50,6 +54,10 @@ def build_tool_registry() -> ToolRegistry:
             KeypointDetectionTool(),
             FeatureMatchingTool(),
             ImageLookupTool(),
+            FaceDetectionTool(),
+            WebcamCaptureTool(),
+            EigenfacesBuilderTool(),
+            FaceRecognitionTool(),
             BowCodebookTool(),
             BowHistogramTool(),
             BowClassifyTool(),
@@ -66,6 +74,10 @@ __all__ = [
     "KeypointDetectionTool",
     "FeatureMatchingTool",
     "ImageLookupTool",
+    "FaceDetectionTool",
+    "WebcamCaptureTool",
+    "EigenfacesBuilderTool",
+    "FaceRecognitionTool",
     "BowCodebookTool",
     "BowHistogramTool",
     "BowClassifyTool",
