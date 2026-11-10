@@ -14,6 +14,7 @@ from forensics_app.tools.haar_adaboost import (
     FeatureType,
     HaarLikeFeature,
     ViolaJonesCascade,
+    activated_classifiers,
     compute_integral_image,
     draw_haar_overlay,
     ensemble_vote,
@@ -418,6 +419,21 @@ class TestHaarAdaBoost(unittest.TestCase):
         arr = np.array(overlay)
         # Bounding box border should have green color component (0, 255, 0)
         self.assertTrue(np.any(arr[:, :, 1] > 200))
+
+
+    def test_activated_classifiers_keeps_only_face_votes(self) -> None:
+        """Only stumps that vote +1 on the patch are returned, in their original order."""
+        arr = np.zeros((19, 19), dtype=np.float64)
+        arr[:, :9] = 1.0  # bright left half -> TWO_VERTICAL score > 0
+        ii = compute_integral_image(arr)
+        fires = HaarLikeFeature(FeatureType.TWO_VERTICAL, (0, 0), 18, 18, threshold=0.0, polarity=-1, weight=0.8)
+        silent = HaarLikeFeature(FeatureType.TWO_VERTICAL, (0, 0), 18, 18, threshold=0.0, polarity=1, weight=0.9)
+        also_fires = HaarLikeFeature(FeatureType.TWO_HORIZONTAL, (0, 0), 18, 18, threshold=1.0, polarity=1, weight=0.1)
+
+        active = activated_classifiers(ii, [fires, silent, also_fires])
+
+        self.assertEqual(active, [fires, also_fires])
+        self.assertEqual(activated_classifiers(ii, []), [])
 
 
 if __name__ == "__main__":

@@ -41,6 +41,7 @@ from .haar_adaboost import (
     DEFAULT_TRAIN_NEG,
     DEFAULT_TRAIN_POS,
     ViolaJonesCascade,
+    activated_classifiers,
     draw_haar_overlay,
     ensure_default_cascade_model,
     load_cascade_model,
@@ -807,11 +808,15 @@ class FaceDetectionTool(ForensicsTool):
 
                 if is_face:
                     confirmed_count += 1
-                    status_lbl = f"CONFIRMED (Passed {stages_passed}/{total_stages} stages)"
-                    # ONLY superimpose unique Haar features and draw bounding box on CONFIRMED faces
+                    active = activated_classifiers(int_norm, all_classifiers)
+                    status_lbl = (
+                        f"CONFIRMED (Passed {stages_passed}/{total_stages} stages, "
+                        f"{len(active)}/{len(all_classifiers)} features active)"
+                    )
+                    # ONLY superimpose the Haar features that fired on this face, on CONFIRMED faces
                     annotated_image = draw_haar_overlay(
                         image=annotated_image,
-                        classifiers=all_classifiers,
+                        classifiers=active,
                         alpha=0.5,
                         patch_size=CANONICAL_PATCH_SIZE,
                         target_box=(fx, fy, fw, fh),
@@ -851,10 +856,12 @@ class FaceDetectionTool(ForensicsTool):
             scores_str = ", ".join([f"S{s+1}: {sc:+.2f}" for s, sc in enumerate(stage_scores)])
 
             if is_face:
-                # ONLY superimpose Haar features and bounding box if confirmed as a face
+                # ONLY superimpose the Haar features that fired, and only if confirmed as a face
+                active = activated_classifiers(int_norm, all_classifiers)
+                details["Active Features"] = f"{len(active)} / {len(all_classifiers)}"
                 annotated_image = draw_haar_overlay(
                     image=input_image,
-                    classifiers=all_classifiers,
+                    classifiers=active,
                     alpha=0.5,
                     patch_size=CANONICAL_PATCH_SIZE,
                     target_box=None,

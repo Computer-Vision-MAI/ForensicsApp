@@ -333,6 +333,16 @@ class ViolaJonesCascade:
         return cls(stages)
 
 
+def activated_classifiers(
+    int_img: np.ndarray, classifiers: list[HaarLikeFeature]
+) -> list[HaarLikeFeature]:
+    """Return the weak classifiers that vote 'face' (+1) on this integral image.
+
+    Used to show, for each detected face, the Haar features that actually fired on it.
+    """
+    return [c for c in classifiers if c.predict(int_img) == 1]
+
+
 def ensemble_vote(
     int_img: np.ndarray, classifiers: list[HaarLikeFeature]
 ) -> tuple[bool, float, list[float]]:
