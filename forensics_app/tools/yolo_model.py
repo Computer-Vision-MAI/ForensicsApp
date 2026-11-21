@@ -9,7 +9,7 @@ Paths are always explicit: the weights live in ``models/yolo`` and the training 
 About colours ("Why are people blue?"): Ultralytics follows OpenCV, so a NumPy array
 given to ``model(...)`` is read as **BGR**, and ``results[0].plot()`` returns BGR too.
 Showing that array with ``plt.imshow`` (which expects RGB) swaps red and blue: the
-orange bus turns blue and so do the people. Here PIL images are passed instead
+blue bus turns orange and the people's reddish skin turns blue. Here PIL images are passed instead
 (Ultralytics converts them correctly) and the boxes are drawn on the original RGB image.
 """
 

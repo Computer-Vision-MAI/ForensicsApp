@@ -72,6 +72,7 @@ class SplitSummary:
     boxes: int = 0
     skipped_boxes: int = 0  # empty boxes (zero width or height) or unknown category
     missing_images: int = 0  # listed in the json but not on disk
+    unlisted_images: int = 0  # on disk but not in the json: copied, without a label file
     per_class: dict[str, int] = field(default_factory=dict)
 
 
@@ -101,10 +102,13 @@ def coco_to_yolo(
     """Convert one split, as asked in the lab.
 
     * creates ``images`` and ``labels`` in ``output_folder``;
-    * copies the image files there;
+    * copies **all** the image files of ``input_folder`` there;
     * reads ``input_folder/_annotations.coco.json``;
     * writes ``labels/{image_name}.txt`` with ``class_id x_center y_center width height``
-      per box. Images without boxes get an empty file (a "background" image for YOLO).
+      per box. Images listed in the json without boxes get an empty file (a "background"
+      image for YOLO). Images that the json does not mention are copied too, but get no
+      label file because nothing is known about them; they are counted in
+      ``unlisted_images`` so they can be checked (YOLO would treat them as background).
 
     ``classes`` lets several splits share the same numbering; by default it is read
     from this split's json.
@@ -144,16 +148,29 @@ def coco_to_yolo(
             summary.per_class[classes.names[int(line.split()[0])]] += 1
         if index % 50 == 0 or index == len(entries) - 1:
             report(index + 1, len(entries), f"{source.name}: {index + 1}/{len(entries)} images")
+
+    # The lab asks to copy every image of the folder, also those the json does not list
+    listed = {Path(info["file_name"]).name for info in entries}
+    for image_path in list_images(source):
+        if image_path.name not in listed:
+            shutil.copy2(image_path, images_dir / image_path.name)
+            summary.unlisted_images += 1
     return summary
 
 
 def write_data_yaml(dataset_root: str | Path, names: list[str], splits: tuple[str, ...] = SPLITS) -> Path:
-    """Write ``data.yaml`` with absolute paths, so training works from any folder."""
+    """Write ``data.yaml`` with paths relative to the folder that contains it.
+
+    There is no ``path:`` key on purpose: Ultralytics then uses the folder of the yaml
+    file as the dataset root (a *relative* ``path:`` would be resolved against its own
+    ``datasets_dir`` setting instead). So the dataset folder can be moved or copied to
+    another computer and still works, from any working directory.
+    """
     root = Path(dataset_root).resolve()
     keys = {"train": "train", "valid": "val", "test": "test"}
-    lines = [f"path: {root.as_posix()}"]
+    lines = []
     for split in splits:
-        lines.append(f"{keys.get(split, split)}: {(root / split / 'images').as_posix()}")
+        lines.append(f"{keys.get(split, split)}: {split}/images")
     lines += ["", f"nc: {len(names)}", f"names: {json.dumps(names)}", ""]
     path = root / "data.yaml"
     path.write_text("\n".join(lines), encoding="utf-8")

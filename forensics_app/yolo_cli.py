@@ -28,6 +28,9 @@ def convert(args: argparse.Namespace) -> int:
     print(f"Classes: {names}")
     for s in summaries:
         print(f"  {s.split:5s}: {s.images} images, {s.boxes} boxes {s.per_class} (skipped {s.skipped_boxes})")
+        if s.missing_images or s.unlisted_images:
+            print(f"         {s.missing_images} listed in the json but missing, "
+                  f"{s.unlisted_images} not in the json (copied without labels)")
     print(f"Wrote {yaml_path}")
     return 0
 

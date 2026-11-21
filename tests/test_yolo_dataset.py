@@ -83,6 +83,18 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual((self.yolo / "train" / "labels" / "b.txt").read_text(), "")
         self.assertEqual((summary.images, summary.boxes, summary.skipped_boxes, summary.missing_images), (2, 2, 1, 1))
         self.assertEqual(summary.per_class, {"PC": 0, "RBC": 1, "WBC": 1})
+        self.assertEqual(summary.unlisted_images, 0)
+
+    def test_images_not_in_the_json_are_copied_without_labels(self) -> None:
+        write_split(self.coco / "train", [("a.jpg", 32, 32)], [ann(0, 2, [0, 0, 8, 8])])
+        Image.new("RGB", (32, 32)).save(self.coco / "train" / "extra.png")
+        (self.coco / "train" / "notes.txt").write_text("not an image")
+        summary = yd.coco_to_yolo(self.coco / "train", self.yolo / "train")
+
+        self.assertTrue((self.yolo / "train" / "images" / "extra.png").is_file())
+        self.assertFalse((self.yolo / "train" / "labels" / "extra.txt").exists())
+        self.assertFalse((self.yolo / "train" / "images" / "notes.txt").exists())
+        self.assertEqual((summary.images, summary.unlisted_images), (1, 1))
 
     def test_missing_json(self) -> None:
         (self.coco / "train").mkdir(parents=True)
@@ -102,6 +114,18 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(yd.split_images_dir(data, yaml_path, "test"), (self.yolo / "test" / "images").resolve())
         with self.assertRaises(KeyError):
             yd.split_images_dir(data, yaml_path, "val")  # no valid split was converted
+
+        # relative paths and no "path:" key, so the dataset folder can be moved or shared
+        text = yaml_path.read_text()
+        self.assertIn("train: train/images", text)
+        self.assertIn("test: test/images", text)
+        self.assertNotIn("path:", text)
+        self.assertNotIn(str(self.root), text)
+        moved = self.root / "moved"
+        self.yolo.rename(moved)
+        data = yd.read_data_yaml(moved / "data.yaml")
+        self.assertEqual(yd.split_images_dir(data, moved / "data.yaml", "train"), (moved / "train" / "images").resolve())
+        self.yolo = moved
 
         stats = yd.dataset_stats(self.yolo / "train" / "images", 3, "train")
         self.assertEqual((stats.images, stats.boxes), (1, 2))

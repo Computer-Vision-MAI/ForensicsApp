@@ -339,7 +339,8 @@ class YoloDatasetTool(ForensicsTool):
         for s in summaries:
             details[f"Converted {s.split}"] = f"{s.images} images, {s.boxes} boxes" + (
                 f", {s.skipped_boxes} empty boxes skipped" if s.skipped_boxes else "") + (
-                f", {s.missing_images} images missing" if s.missing_images else "")
+                f", {s.missing_images} images missing" if s.missing_images else "") + (
+                f", {s.unlisted_images} images not in the json (copied without labels)" if s.unlisted_images else "")
         details.update({k: v for k, v in result.details.items() if k not in ("Operation", "Classes")})
         return ToolResult(
             message=f"Converted {sum(s.images for s in summaries)} images to YOLO format in {display_path(target)}.",

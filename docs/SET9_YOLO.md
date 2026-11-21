@@ -38,19 +38,25 @@ on a laptop RTX 5070 (PyTorch with CUDA, see `requirements-yolo.txt`).
 * On the slides' bus image the result matches the slide: bus 0.94, person 0.89, 0.88,
   0.86, 0.62.
 * **Why are people blue?** Ultralytics follows OpenCV: `results[0].plot()` returns a
-  **BGR** array, and `plt.imshow` reads it as RGB, so red and blue are swapped (the
-  orange bus becomes blue, and so do the people). In the app the PIL image goes in as
-  RGB and the boxes are drawn on the RGB image, so the colours are right.
+  **BGR** array, and `plt.imshow` reads it as RGB, so red and blue are swapped: the
+  bus, which is really blue (a Madrid EMT bus), turns orange, and the people's skin,
+  which is reddish, turns blue. The fix in the notebook is
+  `plt.imshow(results[0].plot()[..., ::-1])` (or `cv2.cvtColor(..., cv2.COLOR_BGR2RGB)`).
+  In the app the PIL image goes in as RGB and the boxes are drawn on the RGB image, so
+  the colours are right.
 
 ## 9.2 Dataset and training
 
 ### COCO → YOLO
 
 `coco_to_yolo(input_folder, output_folder)` does exactly what the lab asks: it creates
-`images/` and `labels/`, copies the images, reads `_annotations.coco.json` and writes one
-`{image_name}.txt` per image with `class_id x_center y_center width height` normalised to
-[0, 1]. `convert_coco_dataset` runs it for train/valid/test and writes `data.yaml` with
-absolute paths.
+`images/` and `labels/`, copies all the images of the folder, reads `_annotations.coco.json`
+and writes one `{image_name}.txt` per image with `class_id x_center y_center width height`
+normalised to [0, 1]. Images that the json does not mention are copied without a label
+file and reported, because YOLO would treat them as background. `convert_coco_dataset`
+runs it for train/valid/test and writes `data.yaml` with paths **relative** to its own
+folder (`train: train/images`, ...) and no `path:` key, so Ultralytics takes the folder of
+the yaml as the dataset root and the dataset can be moved or shared.
 
 Things to know for the Q&A:
 
@@ -81,14 +87,23 @@ best weights are copied to `models/yolo/blood_cell_<model>.pt` (`_scratch` when 
 from a `.yaml`), and the run folder (`models/yolo/runs/...`) keeps Ultralytics' plots.
 
 **Result** (`yolo11n.pt` fine-tuned, 50 epochs, batch 16, 640 px, RTX 5070, 31.8 min):
-best epoch 48, validation mAP@0.5 = 0.977 and mAP@[.5:.95] = 0.835. The losses drop
-suddenly at epoch 40: Ultralytics turns off the *mosaic* augmentation for the last 10
-epochs (`close_mosaic=10`), so the last epochs see images like the real ones.
+best epoch 48, validation mAP@0.5 = 0.977 and mAP@[.5:.95] = 0.835.
+
+* The **training** losses drop from epoch 41 on (box loss 0.587 → 0.560 in two epochs):
+  Ultralytics turns off the *mosaic* augmentation for the last 10 epochs
+  (`close_mosaic=10`), so the last epochs train on single, unmixed images, which are
+  easier. The validation losses and the mAP do not jump, so the drop reflects easier
+  training inputs, not a sudden improvement of the model.
+* The model has **not fully converged**: the validation mAP@[.5:.95] is still rising at
+  the end (0.800 at epoch 20, 0.835 at epoch 48) and the validation loss still falls, so
+  early stopping (patience 20) never triggered. More epochs would probably help a little.
 
 The notebook trains **from scratch** (`YOLO("yolo11n.yaml")`, random weights); the
-slides recommend starting from the pretrained `yolo11n.pt`, which reached mAP@0.5 0.915
-after a single epoch. Both are options in the training dialog, together with fine-tuning
-YOLO26n, and each model is saved under its own name so they can be compared.
+slides recommend starting from the pretrained `yolo11n.pt`. In our 50-epoch run the
+fine-tuned model already reached a validation mAP@0.5 of 0.943 after the first epoch
+(`results.csv`). Both are options in the training dialog, together with fine-tuning
+YOLO26n, and each model is saved under its own name so they can be compared (only the
+fine-tuned YOLO11n has been trained so far).
 
 ## 9.3 Test on an unseen image
 
