@@ -20,6 +20,8 @@ dependencies = [
 # Set 7 bonus (BoW vs CNN). Install the CPU build with requirements-cnn.txt:
 # the default PyPI build of torch for Linux bundles CUDA and weighs several GB.
 cnn = ["torch>=2.2", "torchvision>=0.17"]
+# Set 9 (object detection with YOLO). See requirements-yolo.txt for the GPU/CPU torch builds.
+yolo = ["ultralytics>=8.3.200"]
 
 [tool.setuptools.packages.find]
 include = ["forensics_app*"]

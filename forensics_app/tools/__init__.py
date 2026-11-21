@@ -29,6 +29,13 @@ from .eigenfaces_builder import EigenfacesBuilderTool
 from .face_recognition import FaceRecognitionTool
 from .bow_tools import BowClassifyTool, BowCodebookTool, BowHistogramTool
 from .cnn_tools import CnnCompareTool
+from .yolo_tools import (
+    YoloBloodCellTool,
+    YoloDatasetTool,
+    YoloDetectTool,
+    YoloEvaluateTool,
+    YoloTrainTool,
+)
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -62,6 +69,11 @@ def build_tool_registry() -> ToolRegistry:
             BowHistogramTool(),
             BowClassifyTool(),
             CnnCompareTool(),
+            YoloDetectTool(),
+            YoloDatasetTool(),
+            YoloTrainTool(),
+            YoloBloodCellTool(),
+            YoloEvaluateTool(),
         ]
     )
 
@@ -82,4 +94,9 @@ __all__ = [
     "BowHistogramTool",
     "BowClassifyTool",
     "CnnCompareTool",
+    "YoloDetectTool",
+    "YoloDatasetTool",
+    "YoloTrainTool",
+    "YoloBloodCellTool",
+    "YoloEvaluateTool",
 ]

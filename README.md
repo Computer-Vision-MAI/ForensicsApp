@@ -37,6 +37,35 @@ python -m unittest discover -s tests -v
 python -m compileall forensics_app
 ```
 
+## Set 9: object detection with YOLO (optional dependencies)
+
+The tools in the **Object Detection (YOLO)** sidebar section use Ultralytics,
+which is optional; the rest of the app and the tests work without it.
+
+```
+.venv/bin/pip install -r requirements-yolo.txt   # see the file for CPU / CUDA PyTorch
+```
+
+1. **YOLO: Detect Objects (pretrained)**: COCO model on the working image (weights
+   are downloaded to `models/yolo` the first time).
+2. **YOLO: COCO → YOLO Dataset**: converts the Roboflow blood-cell export
+   (`blood_cell.v1i.coco`) into `datasets/blood_cell_yolo` and shows its statistics.
+3. **YOLO: Train Blood-Cell Detector**: trains and saves `models/yolo/blood_cell_*.pt`
+   (about 45 s per epoch on a laptop GPU, about 10 min on CPU).
+4. **YOLO: Blood Cells (GT vs Prediction)**: trained model on an unseen test image.
+5. **YOLO: Evaluate (mAP, PR, FPPI)**: our own metrics on the test split.
+
+The long steps also run from the command line:
+
+```
+.venv/bin/python -m forensics_app.yolo_cli convert "<lab folder>/blood_cell.v1i.coco"
+.venv/bin/python -m forensics_app.yolo_cli train --epochs 50
+.venv/bin/python -m forensics_app.yolo_cli evaluate --split test
+```
+
+`datasets/` and `models/` are git-ignored. See [docs/SET9_YOLO.md](docs/SET9_YOLO.md)
+for the design and the results.
+
 ## Course roadmap
 
 The shell is intentionally neutral about the algorithms. Possible tool modules  
