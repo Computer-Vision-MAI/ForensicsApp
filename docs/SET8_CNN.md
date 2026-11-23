@@ -70,8 +70,15 @@ the lab's architectures. Three models are trained:
   2. the base is **unfrozen** and the whole network is fine-tuned with a very low learning
      rate (Adam 1e-5, 3 epochs).
 
-  The base is called with `training=False`, so its batch-normalisation layers stay in
-  inference mode during fine-tuning (the standard Keras recipe).
+  In phase 2 the **batch-normalisation layers stay frozen**, so they keep the ImageNet
+  statistics. Calling the base with `training=False` is not enough on its own: once
+  `base_model.trainable = True`, Keras 3 runs them in training mode during `fit`. They then
+  normalise with the statistics of each batch of upsampled CIFAR images and overwrite the
+  ImageNet averages, which changes the features the new head was trained on. In the first
+  run, without this fix, the training accuracy fell from 89% to 51% in the first fine-tuning
+  epoch and fine-tuning lowered the validation accuracy from 73.2% to 69.2% (68.3% on the
+  test set). With the batch-norm layers frozen, fine-tuning raises it from 70.3% to 82.1%
+  (82.4% on the test set).
 * **Why the InceptionV3 model takes 32 × 32 inputs.** InceptionV3 needs at least 75 × 75 px,
   so the model upsamples the CIFAR images to 128 × 128 itself with a `Resizing` layer.
   The model input stays at CIFAR resolution, all three passports say "32 × 32", and a photo
@@ -285,36 +292,45 @@ The notebook then loads them and plots t-SNE and UMAP side by side.
 
 | | `small_cnn` | `vgg_cnn` | `inceptionv3_transfer` |
 |---|---|---|---|
-| Training time (Colab GPU) | 144 s | 181 s | 377 s |
-| Final train accuracy | 93.9% | 100.0% | 96.9% |
-| Final validation accuracy | 65.3% | 68.2% | 69.2% |
-| Epoch with the lowest validation loss | 14 of 30 | 8 of 30 | 1 of 8 |
-| **Test accuracy** | **63.9%** | **66.5%** | **68.3%** |
-| Test loss | 1.36 | 2.42 | 0.96 |
-| Hardest classes (test recall) | cat 45%, dog 51%, deer 55% | cat 46%, bird 48%, dog 54% | cat 53%, bird 58%, deer 62% |
-| Most frequent confusion | dog → cat (191) | cat → dog (192) | dog → cat (155) |
-| t-SNE silhouette (2000 test images) | -0.09 | -0.05 | 0.06 |
+| Training time (Colab GPU) | 148 s | 183 s | 320 s |
+| Final train accuracy | 93.5% | 100.0% | 99.6% |
+| Final validation accuracy | 64.8% | 67.6% | 82.1% |
+| Epoch with the lowest validation loss | 15 of 30 | 8 of 30 | 6 of 8 (first fine-tuning epoch) |
+| **Test accuracy** | **63.5%** | **66.7%** | **82.4%** |
+| Test loss | 1.38 | 2.43 | 0.83 |
+| Hardest classes (test recall) | cat 44%, dog 48%, deer 55% | cat 46%, bird 52%, dog 53% | cat 71%, bird 74%, dog 75% |
+| Most frequent confusion | deer → bird (192), then dog → cat (186) | dog → cat (189) | dog → cat (123) |
+| t-SNE / UMAP silhouette (2000 test images) | -0.09 / -0.09 | -0.08 / -0.07 | 0.24 / 0.26 |
 
 What the passports show:
 
-* **All three overfit.** Training accuracy reaches 94–100% while validation stays at 65–69%.
-  For `vgg_cnn` the validation loss is lowest at epoch 8 and then climbs, with a spike at
-  epoch 22, while the training loss keeps falling. More epochs would not help. Data
+* **All three overfit.** Training accuracy reaches 94–100% while validation stays at 65–68%
+  for the small CNNs and 82% for InceptionV3.
+  For `vgg_cnn` the validation loss is lowest at epoch 8 (0.99) and then climbs to 2.35,
+  while the training loss keeps falling. More epochs would not help. Data
   augmentation, dropout or early stopping would (not done: not in the lab).
-* **Transfer learning wins with a fifth of the data**: 68.3% from 9,000 images and 8 epochs,
-  with the lowest test loss (0.96 against 1.36 and 2.42). Its validation loss is lowest
-  after the first epoch: the pre-trained features are useful immediately. With the full
-  training set (`TRANSFER_TRAIN_SAMPLES = 50000`) it should improve further.
-* **Cat and dog are the hardest pair for every model** (each one's most frequent
-  confusion), followed by bird and deer: animals with similar shapes and backgrounds at
-  32 × 32 px. The vehicles (airplane, automobile, ship, truck) and the frog are recognised
-  best, at 68–80% recall depending on the model.
+* **Transfer learning wins with a fifth of the data**: 82.4% from 9,000 images and 8 epochs,
+  16 points above the best small CNN, with the lowest test loss (0.83 against 1.38 and 2.43).
+  After the first epoch its validation accuracy is already 70.1%: the pre-trained features
+  are useful immediately.
+* **Both phases matter.** With the base frozen, the new layers alone stay at 70–73.5%
+  validation (70.3% at epoch 5) while their validation loss rises. Fine-tuning the whole
+  network jumps to 80.3% in its first epoch and ends at 82.1%. That needs the batch-normalisation
+  layers frozen (see 8.1c). With the full training set (`TRANSFER_TRAIN_SAMPLES = 50000`)
+  it should improve further.
+* **Cat is the hardest class for every model**, and cat ↔ dog is the most frequent
+  confusion of `vgg_cnn` and InceptionV3. For `small_cnn` deer → bird (192) is just ahead
+  of dog → cat (186). Bird and deer follow: animals with similar shapes and backgrounds at
+  32 × 32 px. The vehicles (airplane, automobile, ship, truck) are recognised best: 72–78%
+  recall for the small CNNs, 87–92% for InceptionV3.
 * **Feature projections**:
   * in the InceptionV3 projection the vehicles form their own clusters (automobile and
     truck close together, ship next to airplane);
-  * the animals overlap in the middle, cat and dog most of all;
-  * only InceptionV3 has a positive silhouette, but it is low for every model. The features
-    separate some classes well, not all of them, consistent with the 64–68% accuracy.
+  * there the animals form their own groups too (frog, horse and deer are clear), except
+    bird, cat and dog, which overlap;
+  * only InceptionV3 has a clearly positive silhouette (0.24 / 0.26). The small CNNs stay
+    around zero: their features separate some classes, not most, consistent with their
+    64–67% accuracy.
 * **Grad-CAM** on the horse test image (`00013_horse.png`) highlights the horse's back and
   outline for `vgg_cnn`. For InceptionV3 it is limited to the 2 × 2 map described above.
 
