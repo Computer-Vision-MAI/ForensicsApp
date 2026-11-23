@@ -1,0 +1,9 @@
+# Optional: Set 9 object detection with Ultralytics YOLO (the YOLO tools in the sidebar).
+# The app and the tests work without these packages.
+#   .venv/bin/pip install -r requirements-yolo.txt
+#
+# Ultralytics needs PyTorch. Without a GPU, install the CPU build first (requirements-cnn.txt).
+# Training on CPU takes ~10 min per epoch; with an NVIDIA GPU install a CUDA build instead,
+# matching your driver (nvidia-smi shows the highest CUDA version it supports), e.g.:
+#   .venv/bin/pip install --index-url https://download.pytorch.org/whl/cu132 torch torchvision
+ultralytics>=8.3.200
