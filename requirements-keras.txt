@@ -1,0 +1,6 @@
+# Optional: Set 8 (CNN classification with Keras, feature projection with UMAP).
+# Needed only to load the models trained with docs/cnn_classification_set8.ipynb and to
+# use UMAP; t-SNE comes with scikit-learn. The app and the tests work without these packages.
+#   .venv/bin/pip install -r requirements-keras.txt
+tensorflow>=2.16  # 2.16+ ships Keras 3, the version Colab uses to save model.keras
+umap-learn>=0.5
