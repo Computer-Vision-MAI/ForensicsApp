@@ -37,6 +37,21 @@ python -m unittest discover -s tests -v
 python -m compileall forensics_app
 ```
 
+## Set 8: CNN models (optional)
+
+The tools *CNN: Classify Image (Set 8.2)* and *CNN: Feature Projection (Set 8.3)* use  
+CNNs trained in Colab with [docs/cnn_classification_set8.ipynb](docs/cnn_classification_set8.ipynb).  
+Run the notebook, download `cnn_models.zip` and unzip it into `models/cnn/`, so every  
+model has its own folder (`models/cnn/<model>/passport.json`, `model.keras`, ...).  
+Loading the models needs TensorFlow, and UMAP needs umap-learn. See
+[docs/SET8_CNN.md](docs/SET8_CNN.md) for the design and the results.
+
+Install them with:
+
+```
+python -m pip install -r requirements-keras.txt
+```
+
 ## Set 9: object detection with YOLO (optional dependencies)
 
 The tools in the **Object Detection (YOLO)** sidebar section use Ultralytics,

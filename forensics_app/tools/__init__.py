@@ -36,6 +36,7 @@ from .yolo_tools import (
     YoloEvaluateTool,
     YoloTrainTool,
 )
+from .cnn_model_tools import CnnClassifyTool, CnnProjectionTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -74,6 +75,8 @@ def build_tool_registry() -> ToolRegistry:
             YoloTrainTool(),
             YoloBloodCellTool(),
             YoloEvaluateTool(),
+            CnnClassifyTool(),
+            CnnProjectionTool(),
         ]
     )
 
@@ -99,4 +102,6 @@ __all__ = [
     "YoloTrainTool",
     "YoloBloodCellTool",
     "YoloEvaluateTool",
+    "CnnClassifyTool",
+    "CnnProjectionTool",
 ]

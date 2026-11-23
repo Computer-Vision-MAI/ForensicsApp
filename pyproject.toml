@@ -22,6 +22,8 @@ dependencies = [
 cnn = ["torch>=2.2", "torchvision>=0.17"]
 # Set 9 (object detection with YOLO). See requirements-yolo.txt for the GPU/CPU torch builds.
 yolo = ["ultralytics>=8.3.200"]
+# Set 8 (Keras models trained in Colab, UMAP projection): requirements-keras.txt
+keras = ["tensorflow>=2.16", "umap-learn>=0.5"]
 
 [tool.setuptools.packages.find]
 include = ["forensics_app*"]
