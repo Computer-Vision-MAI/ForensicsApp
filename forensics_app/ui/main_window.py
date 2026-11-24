@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+from tkinter import font as tkfont
 
 from PIL import ImageTk, UnidentifiedImageError
 
@@ -181,12 +182,22 @@ class MainWindow:
         inspector.pack_propagate(False)
         body.add(inspector, weight=0)
         ttk.Label(inspector, text="Results", style="Title.TLabel").pack(anchor="w", pady=(0, 10))
-        self.results = ttk.Treeview(inspector, columns=("value",), show="tree headings", height=15)
+        results_frame = ttk.Frame(inspector)
+        results_frame.pack(fill="both", expand=True)
+        self.results = ttk.Treeview(results_frame, columns=("value",), show="tree headings", height=15)
         self.results.heading("#0", text="Property")
         self.results.heading("value", text="Value")
-        self.results.column("#0", width=95, stretch=True)
-        self.results.column("value", width=120, stretch=True)
-        self.results.pack(fill="both", expand=True)
+        # Fixed-width columns (no stretch) sized to their text, so long values scroll instead of being cut
+        self.results.column("#0", width=95, minwidth=60, stretch=False)
+        self.results.column("value", width=120, minwidth=60, stretch=False)
+        results_scroll = ttk.Scrollbar(results_frame, orient="horizontal", command=self.results.xview)
+        self.results.configure(xscrollcommand=results_scroll.set)
+        self.results.grid(row=0, column=0, sticky="nsew")
+        results_scroll.grid(row=1, column=0, sticky="ew")
+        results_frame.rowconfigure(0, weight=1)
+        results_frame.columnconfigure(0, weight=1)
+        self._results_font = tkfont.nametofont("TkDefaultFont")
+        self.results.bind("<Configure>", lambda _event: self._fit_result_columns())
 
         status_bar = ttk.Frame(container, relief="sunken")
         status_bar.pack(fill="x")
@@ -370,6 +381,29 @@ class MainWindow:
             self.results.delete(item)
         for name, value in details.items():
             self.results.insert("", "end", text=str(name), values=(str(value),))
+        self._fit_result_columns()
+
+    def _fit_result_columns(self) -> None:
+        # Size each column to its longest text; the horizontal scrollbar shows what does not fit
+        font = getattr(self, "_results_font", None)
+        if font is None:  # window built without Tk (unit tests)
+            return
+
+        def text_width(text: object) -> int:
+            return max(font.measure(line) for line in str(text).split("\n"))
+
+        rows = [self.results.item(item) for item in self.results.get_children()]
+        names = ["Property"] + [row["text"] for row in rows]
+        values = ["Value"] + [row["values"][0] if row["values"] else "" for row in rows]
+        visible = self.results.winfo_width()
+        name_width = max(text_width(name) for name in names) + 40  # room for the tree indent
+        # At most half the panel, so the values always start in view
+        name_width = min(name_width, max(95, visible // 2))
+        value_width = max(text_width(value) for value in values) + 20
+        # When everything fits, the value column fills the rest of the panel
+        value_width = max(value_width, visible - name_width)
+        self.results.column("#0", width=name_width)
+        self.results.column("value", width=value_width)
 
     def show_about(self) -> None:
         messagebox.showinfo(
