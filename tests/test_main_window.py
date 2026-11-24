@@ -203,5 +203,46 @@ class SidebarLayoutTests(unittest.TestCase):
             root.destroy()
 
 
+class ResultsPanelTests(unittest.TestCase):
+    def test_long_values_scroll_horizontally(self) -> None:
+        import tkinter as tk
+        from forensics_app.tools import build_tool_registry
+
+        try:
+            root = tk.Tk()
+            root.withdraw()
+        except tk.TclError:
+            self.skipTest("No display available (headless environment)")
+            return
+
+        try:
+            window = MainWindow(root, build_tool_registry())
+            root.geometry("900x500+9999+9999")
+            try:
+                root.attributes("-alpha", 0.0)
+            except tk.TclError:
+                pass
+            root.deiconify()
+            root.update()
+
+            # The Results tree is connected to a horizontal scrollbar
+            self.assertTrue(window.results.cget("xscrollcommand"))
+
+            # A value much wider than the panel gets a column wider than the panel, so it scrolls
+            window._show_details({"Short": "x", "Long": "word " * 100})
+            root.update()
+            total = window.results.column("#0", "width") + window.results.column("value", "width")
+            self.assertGreater(total, window.results.winfo_width())
+            self.assertLess(window.results.xview()[1], 1.0)
+
+            # Short values fill the panel instead of leaving an empty gap
+            window._show_details({"Short": "x"})
+            root.update()
+            total = window.results.column("#0", "width") + window.results.column("value", "width")
+            self.assertGreaterEqual(total, window.results.winfo_width())
+        finally:
+            root.destroy()
+
+
 if __name__ == "__main__":
     unittest.main()
