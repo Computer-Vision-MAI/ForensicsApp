@@ -293,7 +293,7 @@ image was seen in training. The threshold is a dialog option for binary models.
 
 | Model | Params | Best epoch | Val Dice | Val IoU | Test Dice | Test IoU | Time |
 |---|---|---|---|---|---|---|---|
-| binary, BCE + Dice (**notebook**) | 482,737 | 13/15 | **0.960** | 0.923 | **0.931** ± 0.044 | 0.875 | 6.0 min |
+| binary, BCE + Dice (**notebook**) | 482,737 | 13/15 | **0.959** | 0.923 | **0.931** ± 0.044 | 0.875 | 6.0 min |
 | binary, BCE + Dice, **no skip** (Ex. 2) | 434,353 | 15/15 | 0.949 | 0.904 | 0.928 ± 0.032 | 0.868 | 6.3 min |
 | binary, **BCE only** (Ex. 3) | 482,737 | 15/15 | 0.960 | 0.924 | 0.932 ± 0.045 | 0.876 | 11.7 min* |
 | binary, **Dice only** (Ex. 3) | 482,737 | 15/15 | 0.960 | 0.925 | **0.942** ± 0.033 | 0.893 | 9.7 min* |
@@ -309,7 +309,7 @@ noise of a different GPU and random order.
 
 ### The notebook's exercises
 
-**1. Threshold.** Dice of the notebook model on validation: 0.959 at 0.3, **0.960** at 0.5, 0.958
+**1. Threshold.** Dice of the notebook model on validation: 0.9591 at 0.3, **0.9595** at 0.5, 0.9578
 at 0.7 (best 0.45). The curve is flat between ~0.2 and 0.8 (see the passport figure) because
 the network is confident: almost every pixel has P(food) near 0 or 1, so moving the threshold
 only changes the few border pixels. A lower threshold adds border pixels (more FP, fewer FN),
@@ -317,7 +317,7 @@ a higher one removes them. The BCE-only model has a sharper peak at 0.5; the Dic
 is flattest (best 0.65). On the 8 test images the best threshold is 0.20: choosing it there
 would be tuning on the test set.
 
-**2. Skip connections.** Without them validation Dice drops from 0.960 to 0.949 and the curve
+**2. Skip connections.** Without them validation Dice drops from 0.959 to 0.949 and the curve
 is lower in every epoch (best epoch = the last one). On the test set the two are almost equal
 (0.931 vs 0.928, 8 images). The shapes show the difference: with skip connections the mask
 follows the real outline (the square corners of a sandwich box, the irregular salad); without
@@ -331,7 +331,7 @@ idea of the U-Net.
 0.834 for BCE + Dice and 0.851 for Dice), because it gives a gradient to every pixel. Dice alone
 is the least stable (it drops to 0.689 at epoch 4: with few food pixels in a batch its gradient is
 noisy), but it optimises the evaluation metric directly and ends best on test (0.942). After 15
-epochs the three reach the same validation Dice (0.960); with only 8 test images the differences
+epochs the three reach the same validation Dice (0.959-0.960); with only 8 test images the differences
 are within one standard deviation. BCE + Dice combines BCE's stable start with Dice's robustness to
 the class imbalance (10 % food). BCE also has the sharpest threshold curve (its probabilities are
 calibrated around 0.5), Dice the flattest (it pushes every pixel to 0 or 1).
@@ -361,7 +361,7 @@ own class helps to separate it from food. The 43-class model (the slides' colour
 
 The notebook's split is random over the 1,241 images, but XTrain is 17 trays × 73 photos: **all
 17 trays appear in both training and validation**, so a validation image is nearly a copy of
-some training images. For "food vs not food" this barely matters (validation 0.960, test 0.931),
+some training images. For "food vs not food" this barely matters (validation 0.959, test 0.931),
 because colour and texture generalise. For 43 classes the model must recognise *which* food it
 is on trays it has never seen, and several classes appear on a single training tray: cucumber,
 ham, bean, leaf, tomato, canned fruit and apple juice are each on one tray (72-73 images). On the
@@ -373,7 +373,7 @@ honest:
 
 | Task | Split | Validation Dice | Test Dice | Gap |
 |---|---|---|---|---|
-| binary | random (notebook) | 0.960 | 0.931 | validation 0.029 too optimistic |
+| binary | random (notebook) | 0.959 | 0.931 | validation 0.028 too optimistic |
 | binary | by tray | 0.945 | 0.932 | 0.013 |
 | 43 classes | random (notebook) | **0.929** | 0.691 | validation 0.24 too optimistic |
 | 43 classes | by tray | **0.542** | 0.660 | validation now *pessimistic* |
@@ -569,7 +569,7 @@ locality bias, which is what a ViT lacks on limited data.
 | `tools/vit_tools.py`, `tools/vit_render.py` | the four ViT tools and their figures |
 | `tools/yolo_dialogs.py` | the shared form dialog gained text (`str`) and folder (`dir`) fields |
 | `requirements-clip.txt`, `pyproject.toml` (`clip` extra) | optional dependencies |
-| `tests/test_segmentation.py`, `test_unet_torch.py`, `test_clip.py`, `test_vit.py` | 42 new tests |
+| `tests/test_segmentation.py`, `test_unet_torch.py`, `test_clip.py`, `test_vit.py` | 41 new tests |
 
 ## Tests
 

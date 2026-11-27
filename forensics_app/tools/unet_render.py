@@ -253,7 +253,8 @@ def _plot_dice_history(ax, history: dict, best_epoch: int | None) -> None:
     ax.legend(fontsize=8, loc="lower right")
 
 
-def _plot_threshold(ax, thresholds: np.ndarray, dice: np.ndarray, chosen: float | None) -> None:
+def _plot_threshold(ax, thresholds: np.ndarray, dice: np.ndarray, chosen: float | None,
+                    label: str = "validation") -> None:
     if not thresholds.size:
         ax.text(0.5, 0.5, "only for the binary task", ha="center", va="center")
         _no_axes(ax)
@@ -266,24 +267,36 @@ def _plot_threshold(ax, thresholds: np.ndarray, dice: np.ndarray, chosen: float 
         ax.axvline(chosen, color="#888", linestyle="--", linewidth=1, label=f"used {chosen:.2f}")
     ax.set_xlabel("threshold on P(food)")
     ax.set_ylabel("mean Dice")
-    ax.set_title("Exercise 1: Dice vs threshold (validation)", fontsize=10)
+    ax.set_title(f"Exercise 1: Dice vs threshold ({label})", fontsize=10)
     ax.grid(alpha=0.3)
     ax.legend(fontsize=8)
 
 
-def _plot_class_dice(ax, class_names: Sequence[str], val: np.ndarray, test: np.ndarray | None) -> None:
-    n = len(class_names)
+def _plot_class_dice(ax, class_names: Sequence[str], val: np.ndarray, test: np.ndarray | None,
+                     label: str = "validation") -> None:
+    val = np.asarray(val, dtype=float)
+    has_test = test is not None and np.asarray(test).size
+    test = np.asarray(test, dtype=float) if has_test else None
+    # only the classes that appear in the evaluated split(s): 43 names do not fit otherwise
+    present = ~np.isnan(val) if test is None else ~(np.isnan(val) & np.isnan(test))
+    keep = np.flatnonzero(present) if present.any() else np.arange(len(class_names))
+    names = [class_names[i] for i in keep]
+    n = len(names)
     order = np.arange(n)
-    width = 0.4 if test is not None and test.size else 0.8
-    ax.barh(order - (width / 2 if width < 0.8 else 0), np.nan_to_num(val), height=width, color=VAL_COLOR, label="validation")
-    if test is not None and test.size:
-        ax.barh(order + width / 2, np.nan_to_num(test), height=width, color=TEST_COLOR, label="test")
+    width = 0.4 if test is not None else 0.8
+    ax.barh(order - (width / 2 if width < 0.8 else 0), np.nan_to_num(val[keep]), height=width, color=VAL_COLOR,
+            label=label)
+    if test is not None:
+        ax.barh(order + width / 2, np.nan_to_num(test[keep]), height=width, color=TEST_COLOR, label="test")
     ax.set_yticks(order)
-    ax.set_yticklabels(class_names, fontsize=7 if n > 10 else 9)
-    ax.invert_yaxis()
+    ax.set_yticklabels(names, fontsize=9 if n <= 10 else 7 if n <= 20 else 5.5)
+    ax.set_ylim(n - 0.5, -0.5)
     ax.set_xlim(0, 1)
     ax.set_xlabel("Dice")
-    ax.set_title("Dice of each class" + (" (Exercise 6)" if n == 3 else ""), fontsize=10)
+    title = "Dice of each class" + (" (Exercise 6)" if len(class_names) == 3 else "")
+    if n < len(class_names):
+        title += f" ({n} present)"
+    ax.set_title(title, fontsize=10)
     ax.grid(axis="x", alpha=0.3)
     ax.legend(fontsize=8, loc="lower right")
 
@@ -303,7 +316,7 @@ def _plot_dice_vs_iou(ax, dice: np.ndarray, iou: np.ndarray, label: str) -> None
     ax.legend(fontsize=7, loc="upper left")
 
 
-def _plot_confusion(ax, confusion: np.ndarray, class_names: Sequence[str]) -> None:
+def _plot_confusion(ax, confusion: np.ndarray, class_names: Sequence[str], label: str = "validation") -> None:
     rows = confusion.sum(axis=1, keepdims=True)
     with np.errstate(invalid="ignore", divide="ignore"):
         norm = np.where(rows > 0, confusion / rows, 0)
@@ -322,7 +335,7 @@ def _plot_confusion(ax, confusion: np.ndarray, class_names: Sequence[str]) -> No
         ax.set_yticks([])
     ax.set_xlabel("predicted")
     ax.set_ylabel("true")
-    ax.set_title("Pixel confusion matrix (validation, % of each true class)", fontsize=10)
+    ax.set_title(f"Pixel confusion matrix ({label}, % of each true class)", fontsize=10)
 
 
 def _plot_dice_histogram(ax, dice: np.ndarray, label: str, test: np.ndarray | None = None) -> None:
@@ -394,7 +407,7 @@ def render_passport(passport, evaluation=None, worst: Sequence[tuple[str, np.nda
     _plot_dice_history(fig.add_subplot(grid[0, 1]), passport.history, passport.best_epoch)
     if passport.binary:
         _plot_threshold(fig.add_subplot(grid[0, 2]), current["sweep_thresholds"], current["sweep_dice"],
-                        evaluation.threshold if evaluation is not None else passport.threshold)
+                        evaluation.threshold if evaluation is not None else passport.threshold, split_label)
     else:
         _plot_dice_histogram(fig.add_subplot(grid[0, 2]), current["dice"], split_label,
                              saved_test["dice"] if evaluation is None else None)
@@ -407,12 +420,12 @@ def render_passport(passport, evaluation=None, worst: Sequence[tuple[str, np.nda
         _plot_dice_vs_iou(fig.add_subplot(grid[1, 0]), current["dice"], current["iou"], split_label)
         _plot_dice_histogram(fig.add_subplot(grid[1, 1]), current["dice"], split_label,
                              saved_test["dice"] if evaluation is None else None)
-        _plot_confusion(fig.add_subplot(grid[1, 2:]), current["confusion"], names)
+        _plot_confusion(fig.add_subplot(grid[1, 2:]), current["confusion"], names, split_label)
     else:
         _plot_dice_vs_iou(fig.add_subplot(grid[1, 0]), current["dice"], current["iou"], split_label)
         _plot_class_dice(fig.add_subplot(grid[1, 1]), names, current["class_dice"],
-                         saved_test["class_dice"] if evaluation is None else None)
-        _plot_confusion(fig.add_subplot(grid[1, 2:]), current["confusion"], names)
+                         saved_test["class_dice"] if evaluation is None else None, split_label)
+        _plot_confusion(fig.add_subplot(grid[1, 2:]), current["confusion"], names, split_label)
 
     n = len(names)
     if worst:
