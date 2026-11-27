@@ -1,0 +1,7 @@
+# Optional: Sets 10-11 (CLIP zero-shot classification and the U-Net segmentation tools).
+# The U-Net only needs PyTorch (requirements-cnn.txt); CLIP also needs Hugging Face transformers.
+# The app and the tests work without these packages. The CLIP weights are downloaded once to
+# models/clip (ViT-B/32 ~600 MB, ViT-L/14 ~1.7 GB). On Apple Silicon the U-Net trains on the GPU (MPS).
+#   .venv/bin/pip install -r requirements-clip.txt
+-r requirements-cnn.txt
+transformers>=4.45
