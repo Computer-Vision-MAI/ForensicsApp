@@ -74,9 +74,8 @@ def render_patches(image: np.ndarray, image_size: int, patch: int, title: str, s
         stack = [big] + [s for _, s in shifts]
         views = np.stack([s[y0:y0 + patch, x0:x0 + patch] for s in stack])[None]
         ax.imshow(_mosaic(views, gap=1), interpolation="nearest")
-        ax.set_title(f"SPT token of the marked patch: the 5 views stacked = {patch}×{patch}×15 = {patch * patch * 15} "
-                     "numbers\n(original, left-up, left-down, right-up, right-down): it also sees its neighbours",
-                     fontsize=9)
+        ax.set_title(f"SPT token of the marked patch:\nthe 5 views stacked = {patch}×{patch}×15 = {patch * patch * 15} "
+                     "numbers\n(original, left-up, left-down, right-up, right-down)", fontsize=9)
         ax.axis("off")
         fig.text(0.03, 0.46, "Shifted Patch Tokenization (Exercise): the image is shifted diagonally by half a patch "
                  "in 4 directions and stacked with itself on the channel axis before cutting the patches",

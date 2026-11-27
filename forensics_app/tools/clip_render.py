@@ -19,7 +19,12 @@ MAX_BARS = 25
 
 
 def _short(text: str, width: int = 34) -> str:
-    return textwrap.shorten(text, width, placeholder="…")
+    text = " ".join(text.split())
+    if len(text) <= width:
+        return text
+    shortened = textwrap.shorten(text, width, placeholder="…")
+    # shorten() drops whole words, so one long word would become just "…": cut it instead
+    return shortened if len(shortened) > width // 2 else text[:width - 1] + "…"
 
 
 def render_zero_shot(image: Image.Image, results: Sequence[ZeroShotResult], show_cosine: bool = True,
@@ -85,8 +90,9 @@ def render_search(gallery: Gallery, queries: Sequence[str], similarities: np.nda
     rows = len(queries)
     matrix_rows = 1 if show_matrix else 0
     fig = Figure(figsize=(max(10, 2.6 * top_k), 2.9 * rows + (4.8 if show_matrix else 0)), dpi=100)
+    # with the matrix, leave room on the left for the queries written as its row labels
     grid = fig.add_gridspec(rows + matrix_rows, top_k, height_ratios=[1] * rows + ([1.7] * matrix_rows),
-                            hspace=0.55, wspace=0.08)
+                            hspace=0.55, wspace=0.08, left=0.25 if show_matrix else 0.05, right=0.9)
     for q, query in enumerate(queries):
         sims = similarities[q]
         best = np.argsort(-sims)[:top_k]
