@@ -71,3 +71,20 @@ Python, tkinter, scikit-learn, numpy, image processing/manipulation
       compared with Ultralytics `model.val` (fixes the notebook, which reused the IoU 0.5 matches)
 - [x] "Why are people blue?": BGR vs RGB handled and explained
 - [x] Command line for the long jobs: `python -m forensics_app.yolo_cli convert|train|evaluate`
+
+## Week 10
+
+### Functionalities:
+- [x] CLIP zero-shot classification with any number of classes and any text per class
+- [x] U-Net segmentation on TrayDataset: train in the app and save the model with its passport
+- [x] Load a trained U-Net and test it: original / mask / overlay, ground truth and errors
+
+### Extras:
+- [x] CLIP: templates, prompt ensembling, one chart per template, raw cosine vs softmax, two models side by side, presets with the notebook's examples
+- [x] CLIP text → image search with the text × image similarity matrix
+- [x] U-Net tasks: food vs not food, background / tray / food, all 43 classes
+- [x] U-Net exercises: threshold sweep, skip connections on/off, BCE / Dice / both, IoU vs Dice, worst images, per-class Dice
+- [x] Validation split by tray (XTrain is 17 trays × 73 photos: the random split leaks)
+- [x] Model comparison from the passports
+- [x] Extra notebook: ViT ported to PyTorch (MPS), patches and Shifted Patch Tokenization, LSA option, gradient accumulation for 8 GB
+- [x] ViT classification with attention rollout; confusion matrix and classification report; ViT vs SPT comparison

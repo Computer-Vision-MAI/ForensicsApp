@@ -37,6 +37,9 @@ from .yolo_tools import (
     YoloTrainTool,
 )
 from .cnn_model_tools import CnnClassifyTool, CnnProjectionTool
+from .clip_tools import ClipSearchTool, ClipZeroShotTool
+from .vit_tools import VitClassifyTool, VitCompareTool, VitPatchesTool, VitTrainTool
+from .unet_tools import UnetCompareTool, UnetDatasetTool, UnetEvaluateTool, UnetSegmentTool, UnetTrainTool
 
 
 def build_tool_registry() -> ToolRegistry:
@@ -77,6 +80,17 @@ def build_tool_registry() -> ToolRegistry:
             YoloEvaluateTool(),
             CnnClassifyTool(),
             CnnProjectionTool(),
+            ClipZeroShotTool(),
+            ClipSearchTool(),
+            VitPatchesTool(),
+            VitTrainTool(),
+            VitClassifyTool(),
+            VitCompareTool(),
+            UnetDatasetTool(),
+            UnetTrainTool(),
+            UnetSegmentTool(),
+            UnetEvaluateTool(),
+            UnetCompareTool(),
         ]
     )
 
@@ -104,4 +118,15 @@ __all__ = [
     "YoloEvaluateTool",
     "CnnClassifyTool",
     "CnnProjectionTool",
+    "ClipZeroShotTool",
+    "ClipSearchTool",
+    "VitPatchesTool",
+    "VitTrainTool",
+    "VitClassifyTool",
+    "VitCompareTool",
+    "UnetDatasetTool",
+    "UnetTrainTool",
+    "UnetSegmentTool",
+    "UnetEvaluateTool",
+    "UnetCompareTool",
 ]

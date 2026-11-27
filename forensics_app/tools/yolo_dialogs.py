@@ -1,4 +1,4 @@
-"""A small form dialog shared by the YOLO tools (numbers, choices, check boxes, files).
+"""A small form dialog shared by the YOLO and U-Net tools (numbers, text, choices, check boxes, files, folders).
 
 Each field is described by a ``Field``; the dialog validates the numbers when OK is
 pressed and returns a ``{key: value}`` dict, or None when the user cancels. Parsing is
@@ -19,7 +19,7 @@ from typing import Any
 class Field:
     key: str
     label: str
-    kind: str  # "int", "float", "choice", "check", "file", "note"
+    kind: str  # "int", "float", "str", "choice", "check", "file", "dir", "note"
     default: Any = None
     options: Sequence[str] = ()  # for "choice": the texts shown; the value is the index
     minimum: float | None = None
@@ -54,9 +54,11 @@ def parse_fields(fields: Sequence[Field], raw: Mapping[str, Any]) -> dict[str, A
             values[f.key] = index
         elif f.kind == "check":
             values[f.key] = bool(value)
-        elif f.kind == "file":
+        elif f.kind in ("file", "dir"):
             text = str(value or "").strip()
             values[f.key] = Path(text) if text else None
+        elif f.kind == "str":
+            values[f.key] = str(value or "").strip()
         else:
             raise ValueError(f"Unknown field kind {f.kind!r}.")
     return values
@@ -97,12 +99,16 @@ class FormDialog(simpledialog.Dialog):
                     widget.current(int(f.default or 0))
                     widget.bind("<<ComboboxSelected>>", lambda _e, w=widget, v=var: v.set(w.current()))
                     widget.grid(row=row, column=1, columnspan=2, sticky="we", pady=2)
-                elif f.kind == "file":
+                elif f.kind in ("file", "dir"):
                     var = tk.StringVar(master, value="" if f.default is None else str(f.default))
                     widget = ttk.Entry(master, textvariable=var, width=40)
                     widget.grid(row=row, column=1, sticky="we", pady=2)
                     ttk.Button(master, text="Browse…", command=lambda v=var, ff=f: self._browse(v, ff)).grid(
                         row=row, column=2, padx=(4, 0))
+                elif f.kind == "str":
+                    var = tk.StringVar(master, value="" if f.default is None else str(f.default))
+                    widget = ttk.Entry(master, textvariable=var, width=40)
+                    widget.grid(row=row, column=1, columnspan=2, sticky="we", pady=2)
                 else:
                     var = tk.StringVar(master, value=str(f.default))
                     widget = ttk.Entry(master, textvariable=var, width=12)
@@ -119,6 +125,14 @@ class FormDialog(simpledialog.Dialog):
 
     def _browse(self, var: tk.StringVar, f: Field) -> None:
         current = Path(var.get()) if var.get() else None
+        if f.kind == "dir":
+            folder = filedialog.askdirectory(
+                parent=self, title=f.label, mustexist=True,
+                initialdir=str(current) if current and current.is_dir() else None,
+            )
+            if folder:
+                var.set(folder)
+            return
         name = filedialog.askopenfilename(
             parent=self, title=f.label, filetypes=list(f.filetypes),
             initialdir=str(current.parent) if current and current.parent.is_dir() else None,

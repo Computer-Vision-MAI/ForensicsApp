@@ -81,6 +81,27 @@ The long steps also run from the command line:
 `datasets/` and `models/` are git-ignored. See [docs/SET9_YOLO.md](docs/SET9_YOLO.md)
 for the design and the results.
 
+## Sets 10-11: CLIP, Vision Transformers and U-Net segmentation (optional dependencies)
+
+Everything, training included, runs inside the app (no Colab). PyTorch trains on the
+Apple GPU (MPS) or CUDA when there is one; CLIP also needs Hugging Face transformers.
+
+```
+.venv/bin/pip install -r requirements-clip.txt   # torch, torchvision, transformers
+```
+
+* **Vision-Language (CLIP)**: zero-shot classification with any number of classes and any
+  text per class (templates, prompt ensembling, two models side by side) and text → image
+  search. The weights are downloaded once to `models/clip`.
+* **Vision Transformers (ViT)**: the extra notebook. Patches and shifted patch tokens,
+  training on CIFAR-100 (downloaded to `data/` on first use), classification with attention
+  rollout, passport and comparison (confusion matrix, classification report).
+* **Segmentation (U-Net)**: TrayDataset (unzip it to `data/TrayDataset`): explore, train
+  (binary / 3 classes / 43 classes, losses, skip connections), segment an image, passport
+  and evaluation (threshold, IoU, worst images), compare models. Models go to `models/unet`.
+
+See [docs/SET10_11_CLIP_VIT_UNET.md](docs/SET10_11_CLIP_VIT_UNET.md) for the design and the results.
+
 ## Course roadmap
 
 The shell is intentionally neutral about the algorithms. Possible tool modules  
